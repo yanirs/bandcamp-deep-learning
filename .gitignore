@@ -1,4 +1,7 @@
 *.pyc
-.idea/workspace.xml
-tmp/
+.idea/
 .ipynb_checkpoints/
+data/
+lib/
+tmp/
+

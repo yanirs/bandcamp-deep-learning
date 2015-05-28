@@ -1,0 +1,2 @@
+ipython[notebook]==3.1
+Theano==0.7
