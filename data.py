@@ -57,11 +57,11 @@ def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True
 
 def create_lasagne_dataset(raw_dataset, label_to_index):
     return dict(
-        X_train=theano.shared(lasagne.utils.floatX(dataset['training'][0])),
+        X_train=theano.shared(lasagne.utils.floatX(raw_dataset['training'][0])),
         y_train=theano.shared(raw_dataset['training'][1]),
-        X_valid=theano.shared(lasagne.utils.floatX(dataset['validation'][0])),
+        X_valid=theano.shared(lasagne.utils.floatX(raw_dataset['validation'][0])),
         y_valid=theano.shared(raw_dataset['validation'][1]),
-        X_test=theano.shared(lasagne.utils.floatX(dataset['testing'][0])),
+        X_test=theano.shared(lasagne.utils.floatX(raw_dataset['testing'][0])),
         y_test=theano.shared(raw_dataset['testing'][1]),
         num_examples_train=raw_dataset['training'][0].shape[0],
         num_examples_valid=raw_dataset['validation'][0].shape[0],
