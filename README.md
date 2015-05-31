@@ -15,6 +15,6 @@ A small project for classifying Bandcamp album covers by their genre.
 
 Command line to run experiments:
 
-$ python experiment.py run_experiment --help
+    $ python experiment.py run_experiment --help
 
 See notebooks for some examples and experimental results.
