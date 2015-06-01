@@ -45,6 +45,18 @@ def _create_iter_functions_and_dataset(dataset_json, architecture_name, batch_si
 @commandr.command
 def run_experiment(dataset_json=None, architecture_name=None, iter_funcs=None, lasagne_dataset=None, num_epochs=500,
                    batch_size=100):
+    """Run a deep learning experiment, reporting results to standard output.
+
+    Command line or in-process arguments:
+     * dataset_json (str) - path of JSON containing image paths (see data.collect_dataset_filenames)
+     * architecture_name (str) - the name of the architecture to use (see architectures.build_model)
+     * num_epochs (int) - number of training epochs to run
+     * batch_size (int) - number of examples to feed to the network in each batch
+
+    In-process-only arguments:
+     * iter_funcs (dict) - iteration functions, as returned from modeling.create_iter_functions
+     * lasagne_dataset (dict) - lasagne dataset, as returned from data.create_lasagne_dataset
+    """
     if dataset_json is None:
         assert iter_funcs is not None and lasagne_dataset is not None
     else:
