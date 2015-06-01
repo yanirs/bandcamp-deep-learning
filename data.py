@@ -1,19 +1,70 @@
 from collections import defaultdict
+import csv
 import json
+from multiprocessing.pool import ThreadPool
 import random
 import os
+from commandr import command
 
 import lasagne
 import numpy as np
+import requests
 from skimage.io import imread
 import theano
 
 
-def collect_dataset_filenames(local_ratio=0.1, training_ratio=0.8, validation_ratio=0.1, random_seed=0):
+def _download_image((session, url, local_path)):
+    try:
+        response = session.get(url)
+    except requests.RequestException:
+        return False
+    if response.status_code != requests.codes.ok:
+        return False
+
+    with open(local_path, 'wb') as out:
+        out.write(response.content)
+    return True
+
+
+@command
+def download_dataset_images(out_dir, dataset_links_tsv='dataset-links.tsv', num_threads=10):
+    """Download the dataset images to out_dir, based on the links in dataset_links_tsv.
+
+    dataset_links_tsv is expected to be a tab-separated file with two columns: image url, and local path with format
+    <genre>/<album_id>.jpg
+    """
+    if os.path.exists(out_dir):
+        raise ValueError('%s already exists' % out_dir)
+
+    session = requests.Session()
+    with open(dataset_links_tsv, 'rb') as fh:
+        jobs = []
+        genres = set()
+        for url, rel_path in csv.reader(fh, delimiter='\t'):
+            genres.add(os.path.dirname(rel_path))
+            jobs.append((session, url, os.path.join(out_dir, rel_path)))
+    for genre in genres:
+        os.makedirs(os.path.join(out_dir, genre))
+
+    pool = ThreadPool(num_threads)
+    num_successes = sum(pool.map(_download_image, jobs))
+    print('Successfully downloaded %s/%s images' % (num_successes, len(jobs)))
+
+
+@command
+def collect_dataset_filenames(image_dir, out_dir, local_ratio=0.1, training_ratio=0.8, validation_ratio=0.1,
+                              random_seed=0):
+    """Collect dataset filenames from the image_dir (as created by download_dataset_images) to JSON files.
+
+    Two JSONs are created: full and local. Each JSON is a mapping from the subset name to the files in the training,
+    validation and testing subset. The local dataset is a subset of the full dataset's training subset, used for local
+    (e.g., non-GPU) development.
+    """
     datasets_by_name = dict(full=defaultdict(list), local=defaultdict(list))
 
     random.seed(random_seed)
-    for root, _, filenames in os.walk('data/deep-learning-sample'):
+    for root, _, filenames in os.walk(image_dir):
+        filenames.sort()
         random.shuffle(filenames)
         training_high = len(filenames) * training_ratio
         validation_high = len(filenames) * (training_ratio + validation_ratio)
@@ -26,7 +77,7 @@ def collect_dataset_filenames(local_ratio=0.1, training_ratio=0.8, validation_ra
                 )
 
     for dataset_name, dataset in datasets_by_name.iteritems():
-        with open('data/%s-dataset-filenames.json' % dataset_name, 'wb') as out:
+        with open(os.path.join(out_dir, '%s-dataset-filenames.json' % dataset_name), 'wb') as out:
             json.dump(dataset, out)
 
 

@@ -2,7 +2,7 @@ import itertools
 from time import time
 import sys
 
-import commandr
+from commandr import command
 import numpy as np
 
 from architectures import build_model
@@ -42,7 +42,7 @@ def _create_iter_functions_and_dataset(dataset_json, architecture_name, batch_si
     return iter_funcs, lasagne_dataset
 
 
-@commandr.command
+@command
 def run_experiment(dataset_json=None, architecture_name=None, iter_funcs=None, lasagne_dataset=None, num_epochs=500,
                    batch_size=100):
     """Run a deep learning experiment, reporting results to standard output.
@@ -76,6 +76,3 @@ def run_experiment(dataset_json=None, architecture_name=None, iter_funcs=None, l
                 break
     except KeyboardInterrupt:
         pass
-
-if __name__ == '__main__':
-    commandr.Run()
