@@ -8,16 +8,15 @@ env.virtualenv_path = '~/.virtualenvs/bandcamp-deep-learning'
 def setup_virtualenv():
     """Set up the project's virtual environment (bandcamp-deep-learning) and install requirements."""
 
-    read_requirements = lambda requirement_file: ''.join(open(requirement_file)).replace('\n', ' ')
-
     # Install apt requirements
     sudo('apt-get -qy update')
-    sudo('apt-get -qy install %s' % read_requirements('requirements-apt.txt'))
+    sudo('apt-get -qy install %s' % ''.join(open('requirements-apt.txt')).replace('\n', ' '))
 
     # Create virtual environment and install pip requirements
     if not files.exists(env.virtualenv_path):
         run('virtualenv %s' % env.virtualenv_path)
-    run('%s/bin/pip install -q %s' % (env.virtualenv_path, read_requirements('requirements.txt')))
+    for requirement in open('requirements.txt'):
+        run('%s/bin/pip install %s' % (env.virtualenv_path, requirement))
 
     # Install Lasagne
     if not files.exists('lib/Lasagne'):
@@ -33,7 +32,8 @@ def package_and_upload_project():
     """Package the project and upload it to the remote environment."""
     local(r'7z a -x@.gitignore -x\!.git/ -r deploy.7z ./')
     run('rm -rf %s-prev' % env.project_name)
-    run('mv %s %s-prev' % (env.project_name, env.project_name))
+    if files.exists(env.project_name):
+        run('mv %s %s-prev' % (env.project_name, env.project_name))
     run('mkdir %s' % env.project_name)
     put('deploy.7z', env.project_name)
     with cd(env.project_name):
@@ -43,7 +43,21 @@ def package_and_upload_project():
 
 
 @task
-def deploy():
+def test_cuda():
+    """Test that the CUDA installation works.
+
+    This assumes that CUDA has been installed on Ubuntu 14.04, as described here:
+    https://github.com/BVLC/caffe/wiki/Caffe-on-EC2-Ubuntu-14.04-Cuda-7
+    """
+    run('/usr/local/cuda/bin/cuda-install-samples-7.0.sh ~/')
+    with cd('NVIDIA_CUDA-7.0_Samples/1_Utilities/deviceQuery'):
+        run('make')
+        run('./deviceQuery')
+
+
+@task
+def deploy(skip_env_setup=False):
     """Create a virtualenv, update requirements, and deploy the project."""
-    setup_virtualenv()
+    if not skip_env_setup:
+        setup_virtualenv()
     package_and_upload_project()

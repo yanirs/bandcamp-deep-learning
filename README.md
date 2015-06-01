@@ -39,8 +39,20 @@ Then, create the training/validation/testing split by running:
 
 Check command line help to run experiments:
 
-    $ workon bandcamp-deep-learning
-    $ cd bandcamp-deep-learning
     $ python manage.py run_experiment --help
 
+For example, to run a multi-layer perceptron (assuming you created the dataset as above):
+
+    $ python manage.py run_experiment --dataset-json ~/data/local-dataset-filenames.json --architecture-name mlp
+
 See notebooks for some examples and experimental results.
+
+## Using the GPU
+
+Set up CUDA as described in one of the many manuals (I simply used the AWS AMI from
+[Caffe](https://github.com/BVLC/caffe/wiki/Caffe-on-EC2-Ubuntu-14.04-Cuda-7)) and run experiments with additional
+with the correct environment variables. For example:
+
+    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment --dataset-json ~/data/local-dataset-filenames.json --architecture-name mlp
+
+This should be much faster than running with the default settings.
