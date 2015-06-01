@@ -1,0 +1,11 @@
+gfortran
+git
+libatlas-dev
+libffi-dev
+libfreetype6-dev
+libjpeg8-dev
+liblapack-dev
+libxft-dev
+p7zip-full
+python-dev
+virtualenvwrapper
