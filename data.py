@@ -1,9 +1,12 @@
 from collections import defaultdict
+from cStringIO import StringIO
 import csv
+from gzip import GzipFile
 import json
 from multiprocessing.pool import ThreadPool
 import random
 import os
+import cPickle
 
 from commandr import command
 import numpy as np
@@ -123,3 +126,15 @@ def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True
         dataset[subset] = (np.array(instances, dtype='float32'), np.array(labels, dtype='int32'))
 
     return dataset, label_to_index
+
+
+@command
+def download_mnist(data_dir):
+    """Download MNIST dataset and convert it to the same format as the Bandcamp dataset (useful as a sanity check)."""
+    response = requests.get('http://deeplearning.net/data/mnist/mnist.pkl.gz')
+    with GzipFile(fileobj=StringIO(response.content), mode='rb') as unzipped:
+        raw_data = cPickle.load(unzipped)
+    dataset = {name: (d[0], d[1].astype('int32')) for name, d in zip(['training', 'validation', 'testing'], raw_data)}
+    label_to_index = dict(zip(range(10), range(10)))
+    with open(os.path.join(data_dir, 'mnist.pkl.zip'), 'wb') as out:
+        pkl_utils.dump((dataset, label_to_index), out)

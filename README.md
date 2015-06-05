@@ -35,6 +35,11 @@ Then, create the training/validation/testing split and dataset pickles by runnin
 
     $ python manage.py create_datasets ~/data/images ~/data
 
+**Note:** as a sanity check, it may be worth downloading the MNIST dataset and converting it the format used by the
+`run_experiment` command. This can be done by running:
+
+    $ python manage.py download_mnist ~/data
+
 # Running experiments
 
 Check command line help to run experiments:
