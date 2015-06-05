@@ -4,12 +4,12 @@ import json
 from multiprocessing.pool import ThreadPool
 import random
 import os
-from commandr import command
 
+from commandr import command
 import numpy as np
 import requests
 from skimage.io import imread
-import theano
+from theano_latest.misc import pkl_utils
 
 
 def _download_image((session, url, local_path)):
@@ -50,7 +50,6 @@ def download_dataset_images(out_dir, dataset_links_tsv='dataset-links.tsv', num_
     print('Successfully downloaded %s/%s images' % (num_successes, len(jobs)))
 
 
-@command
 def collect_dataset_filenames(image_dir, out_dir, local_ratio=0.1, training_ratio=0.8, validation_ratio=0.1,
                               random_seed=0):
     """Collect dataset filenames from the image_dir (as created by download_dataset_images) to JSON files.
@@ -75,9 +74,29 @@ def collect_dataset_filenames(image_dir, out_dir, local_ratio=0.1, training_rati
                     os.path.join(root, filename) for filename in filenames[int(ratio * low):int(ratio * high)]
                 )
 
+    dataset_name_to_path = {}
     for dataset_name, dataset in datasets_by_name.iteritems():
-        with open(os.path.join(out_dir, '%s-dataset-filenames.json' % dataset_name), 'wb') as out:
+        path = os.path.join(out_dir, '%s-dataset-filenames.json' % dataset_name)
+        with open(path, 'wb') as out:
             json.dump(dataset, out)
+        dataset_name_to_path[dataset_name] = path
+    return dataset_name_to_path
+
+
+@command
+def create_datasets(image_dir, out_dir, skip_full_pickle=False):
+    """Create the dataset pickles and JSONs.
+
+    This is a wrapper around collect_dataset_filenames and load_raw_dataset that creates both the local and full
+    datasets.
+
+    On systems with little memory, pass in skip_full_pickle=True to skip creating the pickle for the full dataset.
+    """
+    for dataset_name, json_path in collect_dataset_filenames(image_dir, out_dir).iteritems():
+        if skip_full_pickle and dataset_name == 'full':
+            continue
+        with open(os.path.join(out_dir, '%s.pkl.zip' % dataset_name), 'wb') as out:
+            pkl_utils.dump(load_raw_dataset(json_path), out)
 
 
 def _get_filename_genre(filename):
@@ -101,5 +120,6 @@ def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True
             assert image_arr.shape == expected_image_shape
             instances.append(image_arr.flatten())
             labels.append(label_to_index[_get_filename_genre(filename)])
-        dataset[subset] = (np.array(instances, dtype=theano.config.floatX), np.array(labels, dtype='int32'))
+        dataset[subset] = (np.array(instances, dtype='float32'), np.array(labels, dtype='int32'))
+
     return dataset, label_to_index

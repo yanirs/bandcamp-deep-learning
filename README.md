@@ -31,9 +31,9 @@ After the downloads finish, you should have 10 sub-directories under `~/data/ima
 [Bandcamp Recommender](http://www.bcrecommender.com/). Bandcamp album tags are assigned by artists, and each album
 can have multiple tags. The chosen albums match only one of the chosen tags/genres.
 
-Then, create the training/validation/testing split by running:
+Then, create the training/validation/testing split and dataset pickles by running:
 
-    $ python manage.py collect_dataset_filenames ~/data/images ~/data
+    $ python manage.py create_datasets ~/data/images ~/data
 
 # Running experiments
 
@@ -43,16 +43,24 @@ Check command line help to run experiments:
 
 For example, to run a multi-layer perceptron (assuming you created the dataset as above):
 
-    $ python manage.py run_experiment --dataset-json ~/data/local-dataset-filenames.json --architecture-name mlp
+    $ THEANO_FLAGS=floatX=float32 python manage.py run_experiment --dataset-path ~/data/local.pickle --architecture-name mlp
 
 See notebooks for some examples and experimental results.
 
-## Using the GPU
+## Using a GPU
 
 Set up CUDA as described in one of the many manuals (I simply used the AWS AMI from
 [Caffe](https://github.com/BVLC/caffe/wiki/Caffe-on-EC2-Ubuntu-14.04-Cuda-7)) and run experiments with additional
 with the correct environment variables. For example:
 
-    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment --dataset-json ~/data/local-dataset-filenames.json --architecture-name mlp
+    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment --dataset-path ~/data/local.pickle --architecture-name mlp
 
 This should be much faster than running with the default settings.
+
+## Experimenting with the full dataset on a GPU
+
+Depending on the size of your GPU's memory, you may need to copy the training dataset to the GPU in chunks. This is
+achieved by passing the --training-chunk-size parameter to run_experiment. For example, the following would work on
+an AWS g2.2xlarge instance (GPU memory of 4GB).
+
+    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment --dataset-path ~/data/full.pickle --architecture-name mlp --batch-size 500 --training-chunk-size 4000
