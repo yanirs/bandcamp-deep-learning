@@ -1,50 +1,46 @@
-import itertools
 from time import time
 import sys
 
 from commandr import command
-import numpy as np
 
 from architectures import build_model
-from data import load_raw_dataset, create_lasagne_dataset
-from modeling import create_iter_functions
+from data import load_raw_dataset
+from modeling import create_train_iter_function, create_eval_function
 
 
-def train(iter_funcs, dataset, batch_size):
-    """Train the model with `dataset` with mini-batch training. Each mini-batch has `batch_size` recordings."""
+def run_training_iteration(train_iter, num_training_batches):
+    """Run a single training iteration, returning the training loss."""
+    return sum(train_iter(b) for b in xrange(num_training_batches)) / num_training_batches
 
-    num_batches_train = dataset['num_examples_train'] // batch_size
-    num_batches_valid = dataset['num_examples_valid'] // batch_size
 
-    for epoch in itertools.count(1):
-        batch_valid_losses = []
-        batch_valid_accuracies = []
-        for b in xrange(num_batches_valid):
-            batch_valid_loss, batch_valid_accuracy = iter_funcs['valid'](b)
-            batch_valid_losses.append(batch_valid_loss)
-            batch_valid_accuracies.append(batch_valid_accuracy)
-
-        yield {
-            'number': epoch,
-            'train_loss': np.mean([iter_funcs['train'](b) for b in xrange(num_batches_train)]),
-            'valid_loss': np.mean(batch_valid_losses),
-            'valid_accuracy': np.mean(batch_valid_accuracies),
-        }
+def check_validation_loss_and_accuracy(valid_iter, num_validation_batches):
+    """Return the validation loss and accuracy."""
+    sum_losses = 0.0
+    sum_accuracies = 0.0
+    for b in xrange(num_validation_batches):
+        batch_loss, batch_accuracy = valid_iter(b)
+        sum_losses += batch_loss
+        sum_accuracies += batch_accuracy
+    return sum_losses / num_validation_batches, sum_accuracies / num_validation_batches
 
 
 def _create_iter_functions_and_dataset(dataset_json, architecture_name, batch_size):
-    lasagne_dataset = create_lasagne_dataset(*load_raw_dataset(dataset_json))
+    # Not caching the dataset because it takes longer to load it from pickle
+    dataset, label_to_index = load_raw_dataset(dataset_json)
     output_layer = build_model(architecture_name,
-                               input_dim=lasagne_dataset['input_dim'],
-                               output_dim=lasagne_dataset['output_dim'],
+                               input_dim=dataset['training'][0].shape[1],
+                               output_dim=len(label_to_index),
                                batch_size=batch_size)
-    iter_funcs = create_iter_functions(lasagne_dataset, output_layer)
-    return iter_funcs, lasagne_dataset
+    return (
+        create_train_iter_function(dataset, output_layer),
+        create_eval_function(dataset, 'validation', output_layer),
+        dataset
+    )
 
 
 @command
-def run_experiment(dataset_json=None, architecture_name=None, iter_funcs=None, lasagne_dataset=None, num_epochs=500,
-                   batch_size=100):
+def run_experiment(dataset_json=None, architecture_name=None, train_iter=None, valid_iter=None,
+                   dataset=None, num_epochs=500, batch_size=100):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -54,25 +50,29 @@ def run_experiment(dataset_json=None, architecture_name=None, iter_funcs=None, l
      * batch_size (int) - number of examples to feed to the network in each batch
 
     In-process-only arguments:
-     * iter_funcs (dict) - iteration functions, as returned from modeling.create_iter_functions
-     * lasagne_dataset (dict) - lasagne dataset, as returned from data.create_lasagne_dataset
+     * train_iter (theano.function) - training iteration function, as returned from modeling.create_train_iter_function
+     * valid_iter (theano.function) - validation evaluation function, as returned from modeling.create_eval_function
+     * dataset (dict) - the raw dataset, as returned from data.load_raw_dataset
     """
     if dataset_json is None:
-        assert iter_funcs is not None and lasagne_dataset is not None
+        assert train_iter is not None and dataset is not None
     else:
-        iter_funcs, lasagne_dataset = _create_iter_functions_and_dataset(dataset_json, architecture_name, batch_size)
+        train_iter, valid_iter, dataset = \
+            _create_iter_functions_and_dataset(dataset_json, architecture_name, batch_size)
 
+    num_training_batches = dataset['training'][0].shape[0] // batch_size
+    num_validation_batches = dataset['validation'][0].shape[0] // batch_size
     now = time()
     try:
-        for epoch in train(iter_funcs, lasagne_dataset, batch_size):
-            print('Epoch %s of %s took %.3fs' % (epoch['number'], num_epochs, time() - now))
+        for epoch in xrange(num_epochs):
+            training_loss = run_training_iteration(train_iter, num_training_batches)
+            validation_loss, validation_accuracy = check_validation_loss_and_accuracy(valid_iter,
+                                                                                      num_validation_batches)
+            print('Epoch %s of %s took %.3fs' % (epoch + 1, num_epochs, time() - now))
             now = time()
-            print('\ttraining loss:\t\t %.6f' % epoch['train_loss'])
-            print('\tvalidation loss:\t\t %.6f' % epoch['valid_loss'])
-            print('\tvalidation accuracy:\t\t %.2f%%' % (epoch['valid_accuracy'] * 100))
+            print('\ttraining loss:\t\t %.6f' % training_loss)
+            print('\tvalidation loss:\t\t %.6f' % validation_loss)
+            print('\tvalidation accuracy:\t\t %.2f%%' % (validation_accuracy * 100))
             sys.stdout.flush()
-
-            if epoch['number'] >= num_epochs:
-                break
     except KeyboardInterrupt:
         pass
