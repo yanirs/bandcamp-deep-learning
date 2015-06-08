@@ -20,7 +20,8 @@ A small project for classifying Bandcamp album covers by their genre.
 
 Download the images to, e.g., `~/data/images` by running:
 
-    $ python manage.py download_dataset_images --out-dir ~/data/images --dataset-links-tsv dataset-links.tsv
+    $ python manage.py download_dataset_images --out-dir ~/data/images \
+                                               --dataset-links-tsv dataset-links.tsv
     
 This may take a while. You can check progress by running:
 
@@ -46,11 +47,15 @@ Check command line help to run experiments:
 
     $ python manage.py run_experiment --help
 
-For example, to run a multi-layer perceptron (assuming you created the dataset as above):
+For example, to run a multi-layer perceptron with a single hidden layer and 256 hidden units (assuming you created the
+dataset as above):
 
-    $ THEANO_FLAGS=floatX=float32 python manage.py run_experiment --dataset-path ~/data/local.pickle --architecture-name mlp
+    $ THEANO_FLAGS=floatX=float32 python manage.py run_experiment \
+        --dataset-path ~/data/local.pkl.zip --model-architecture SingleLayerMlp \
+        --model-params num_hidden_units=256
 
-See notebooks for some examples and experimental results.
+See notebooks for some examples and experimental results (though the notebooks may not be runnable due to recent code
+changes).
 
 ## Using a GPU
 
@@ -58,7 +63,8 @@ Set up CUDA as described in one of the many manuals (I simply used the AWS AMI f
 [Caffe](https://github.com/BVLC/caffe/wiki/Caffe-on-EC2-Ubuntu-14.04-Cuda-7)) and run experiments with additional
 with the correct environment variables. For example:
 
-    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment --dataset-path ~/data/local.pickle --architecture-name mlp
+    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment \
+        --dataset-path ~/data/local.pkl.zip --model-architecture SingleLayerMlp
 
 This should be much faster than running with the default settings.
 
@@ -68,4 +74,6 @@ Depending on the size of your GPU's memory, you may need to copy the training da
 achieved by passing the --training-chunk-size parameter to run_experiment. For example, the following would work on
 an AWS g2.2xlarge instance (GPU memory of 4GB).
 
-    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment --dataset-path ~/data/full.pickle --architecture-name mlp --batch-size 500 --training-chunk-size 4000
+    $ THEANO_FLAGS=device=gpu,floatX=float32 python manage.py run_experiment \
+        --dataset-path ~/data/full.pkl.zip --model-architecture SingleLayerMlp \
+        --batch-size 500 --training-chunk-size 4000
