@@ -12,7 +12,7 @@ from modeling import create_training_function, create_eval_function
 
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=500, batch_size=100,
-                   training_chunk_size=0):
+                   training_chunk_size=0, reshape_to=None):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -25,16 +25,16 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * training_chunk_size (int) - number of training examples to copy to the GPU in each chunk. If set to zero, all
                                    examples will be copied. This is faster, but impossible when the size of the training
                                    set is larger than the GPU's memory
+     * reshape_to (str) - if given, the data will be reshaped to match this string, which should evaluate to a Python
+                          tuple of ints (e.g., may be required to make the dataset fit into a convnet input layer)
     """
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if not model_architecture in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
                                                                          sorted(ARCHITECTURE_NAME_TO_CLASS)))
 
-    with open(dataset_path, 'rb') as dataset_file:
-        dataset, label_to_index = pkl_utils.load(dataset_file)
-
-    model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](input_dim=dataset['training'][0].shape[1],
+    dataset, label_to_index = _load_data(dataset_path, reshape_to)
+    model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](input_shape=tuple(dataset['training'][0].shape[1:]),
                                                                    output_dim=len(label_to_index),
                                                                    batch_size=batch_size)
     output_layer = model_builder.build(**_parse_model_params(model_params))
@@ -42,6 +42,16 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     _run_training_loop(training_iter=create_training_function(dataset, output_layer, batch_size, training_chunk_size),
                        validation_eval=create_eval_function(dataset, 'validation', output_layer, batch_size),
                        num_epochs=num_epochs)
+
+
+def _load_data(dataset_path, reshape_to):
+    with open(dataset_path, 'rb') as dataset_file:
+        dataset, label_to_index = pkl_utils.load(dataset_file)
+    if reshape_to:
+        reshape_to = literal_eval(reshape_to)
+        for subset_name, (data, labels) in dataset.iteritems():
+            dataset[subset_name] = data.reshape((data.shape[0], ) + reshape_to), labels
+    return dataset, label_to_index
 
 
 def _parse_model_params(model_params):
