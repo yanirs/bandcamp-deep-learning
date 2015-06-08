@@ -7,7 +7,6 @@ import theano
 from theano_latest.misc import pkl_utils
 
 from architectures import ARCHITECTURE_NAME_TO_CLASS
-from modeling import create_training_function, create_eval_function
 
 
 @command
@@ -34,14 +33,11 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
                                                                          sorted(ARCHITECTURE_NAME_TO_CLASS)))
 
     dataset, label_to_index = _load_data(dataset_path, reshape_to)
-    model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](input_shape=tuple(dataset['training'][0].shape[1:]),
-                                                                   output_dim=len(label_to_index),
-                                                                   batch_size=batch_size)
-    output_layer = model_builder.build(**_parse_model_params(model_params))
-
-    _run_training_loop(training_iter=create_training_function(dataset, output_layer, batch_size, training_chunk_size),
-                       validation_eval=create_eval_function(dataset, 'validation', output_layer, batch_size),
-                       num_epochs=num_epochs)
+    model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
+        dataset, output_dim=len(label_to_index), batch_size=batch_size, training_chunk_size=training_chunk_size
+    )
+    _, training_iter, validation_eval = model_builder.build(**_parse_model_params(model_params))
+    _run_training_loop(training_iter, validation_eval, num_epochs)
 
 
 def _load_data(dataset_path, reshape_to):

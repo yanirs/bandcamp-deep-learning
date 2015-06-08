@@ -1,25 +1,9 @@
 import inspect
 import sys
 
-from lasagne.nonlinearities import softmax
-from lasagne.layers import Conv2DLayer, DenseLayer, DropoutLayer, InputLayer, MaxPool2DLayer
+from lasagne.layers import Conv2DLayer, DenseLayer, DropoutLayer, MaxPool2DLayer
 
-
-class AbstractModelBuilder(object):
-    """Builder of Lasagne models, with architecture-specific implementation by concrete subclasses."""
-
-    def __init__(self, input_shape, output_dim, batch_size):
-        self.input_shape = input_shape
-        self.output_dim = output_dim
-        self.batch_size = batch_size
-
-    def build(self, **kwargs):
-        """Build the model, returning the output layer."""
-        l_in = InputLayer(shape=(self.batch_size, ) + self.input_shape)
-        return DenseLayer(self._build_middle(l_in, **kwargs), num_units=self.output_dim, nonlinearity=softmax)
-
-    def _build_middle(self, l_in, **kwargs):
-        raise NotImplementedError
+from modeling import AbstractModelBuilder
 
 
 class SingleLayerMlp(AbstractModelBuilder):
