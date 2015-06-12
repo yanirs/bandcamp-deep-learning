@@ -11,6 +11,7 @@ import cPickle
 from commandr import command
 import numpy as np
 import requests
+from skimage.color import gray2rgb
 from skimage.io import imread
 from theano_latest.misc import pkl_utils
 
@@ -98,15 +99,17 @@ def create_datasets(image_dir, out_dir, skip_full_pickle=False):
     for dataset_name, json_path in collect_dataset_filenames(image_dir, out_dir).iteritems():
         if skip_full_pickle and dataset_name == 'full':
             continue
-        with open(os.path.join(out_dir, '%s.pkl.zip' % dataset_name), 'wb') as out:
-            pkl_utils.dump(load_raw_dataset(json_path), out)
+        # Create both a greyscale representation (no suffix) and an RGB representation (.rgb suffix)
+        for suffix, as_grey, flatten in [('', True, True), ('.rgb', False, False)]:
+            with open(os.path.join(out_dir, '%s%s.pkl.zip' % (dataset_name, suffix)), 'wb') as out:
+                pkl_utils.dump(load_raw_dataset(json_path, as_grey=as_grey, flatten=flatten), out)
 
 
 def _get_filename_genre(filename):
     return filename.split('/')[-2]
 
 
-def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True):
+def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True, flatten=True):
     """Return a mapping from training/validation/testing to (<instances>, <labels>), and a label to index mapping."""
 
     with open(dataset_json, 'rb') as in_file:
@@ -120,8 +123,14 @@ def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True
         labels = []
         for filename in filenames:
             image_arr = imread(filename, as_grey=as_grey)
-            assert image_arr.shape == expected_image_shape
-            instances.append(image_arr.flatten())
+            assert image_arr.shape[:2] == expected_image_shape, '%s has shape %s' % (filename, image_arr.shape)
+            if not as_grey:
+                # Convert greyscale images to RGB
+                if len(image_arr.shape) == 2:
+                    image_arr = gray2rgb(image_arr)
+                # Reshape image from (height, width, num_channels) to (num_channels, height, width)
+                image_arr = image_arr.transpose(2, 0, 1)
+            instances.append(image_arr.flatten() if flatten else image_arr)
             labels.append(label_to_index[_get_filename_genre(filename)])
         dataset[subset] = (np.array(instances, dtype='float32'), np.array(labels, dtype='int32'))
 
