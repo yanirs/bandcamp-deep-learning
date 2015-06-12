@@ -66,7 +66,7 @@ def _parse_model_params(model_params):
                 param_kwargs[key] = literal_eval(value)
             except (SyntaxError, ValueError):
                 param_kwargs[key] = value
-        print('Parsed model params: {}'.format(param_kwargs))
+        print('Parsed model params: {}'.format(sorted(param_kwargs.iteritems())))
     return param_kwargs
 
 

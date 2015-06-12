@@ -35,7 +35,10 @@ class ConvNet(AbstractModelBuilder):
         l_bottom = l_in
         for i in xrange(num_conv_layers):
             l_bottom = Conv2DLayer(l_bottom, **self._extract_layer_kwargs('c', i, kwargs))
-            l_bottom = MaxPool2DLayer(l_bottom, **self._extract_layer_kwargs('m', i, kwargs))
+            max_pool_kwargs = self._extract_layer_kwargs('m', i, kwargs)
+            if 'pool_size' not in max_pool_kwargs:
+                max_pool_kwargs['pool_size'] = (2, 2)
+            l_bottom = MaxPool2DLayer(l_bottom, **max_pool_kwargs)
         for i in xrange(num_dense_layers):
             l_bottom = _build_dense_plus_dropout(l_bottom, **self._extract_layer_kwargs('d', i, kwargs))
         return l_bottom
@@ -56,9 +59,7 @@ class LasagneMnistConvExample(ConvNet):
         return super(LasagneMnistConvExample, self)._build_middle(
             l_in, num_conv_layers=2, num_dense_layers=1,
             lc0_num_filters=32, lc0_filter_size=(5, 5),
-            lm0_pool_size=(2, 2),
             lc1_num_filters=32, lc1_filter_size=(5, 5),
-            lm1_pool_size=(2, 2),
             ld0_num_units=256
         )
 
