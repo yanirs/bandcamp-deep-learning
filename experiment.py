@@ -66,15 +66,15 @@ def _run_training_loop(training_iter, validation_eval, num_epochs):
     now = time()
     try:
         validation_loss, validation_accuracy = validation_eval()
-        print('Initial validation loss & accuracy: %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
+        print('Initial validation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
 
         for epoch in xrange(num_epochs):
             training_loss = training_iter()
             validation_loss, validation_accuracy = validation_eval()
             print('Epoch %s of %s took %.3fs' % (epoch + 1, num_epochs, time() - now))
             now = time()
-            print('\ttraining loss:\t\t %.6f' % training_loss)
-            print('\tvalidation loss & accuracy:\t\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
+            print('\ttraining loss:\t\t\t %.6f' % training_loss)
+            print('\tvalidation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
             sys.stdout.flush()
     except KeyboardInterrupt:
         pass
