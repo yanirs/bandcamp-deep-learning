@@ -30,11 +30,16 @@ class LasagneMnistConvExample(AbstractModelBuilder):
                                    dense (256) -> dropout -> out.
     """
 
-    def _build_middle(self, l_in, **_):
+    def _build_middle(self, l_in, l1_num_filters=32, l1_filter_size=(5, 5), l1_pool_size=(2, 2),
+                      l2_num_filters=32, l2_filter_size=(5, 5), l2_pool_size=(2, 2), dense_num_hidden_units=256, **_):
         assert len(l_in.shape) == 4, 'InputLayer shape must be (batch_size, channels, width, height) -- reshape data?'
-        l_conv_pool1 = _build_conv_plus_max_pool(l_in, num_filters=32, filter_size=(5, 5), pool_size=(2, 2))
-        l_conv_pool2 = _build_conv_plus_max_pool(l_conv_pool1, num_filters=32, filter_size=(5, 5), pool_size=(2, 2))
-        return _build_dense_plus_dropout(l_conv_pool2, num_hidden_units=256)
+        l_conv_pool1 = _build_conv_plus_max_pool(
+            l_in, num_filters=l1_num_filters, filter_size=l1_filter_size, pool_size=l1_pool_size
+        )
+        l_conv_pool2 = _build_conv_plus_max_pool(
+            l_conv_pool1, num_filters=l2_num_filters, filter_size=l2_filter_size, pool_size=l2_pool_size
+        )
+        return _build_dense_plus_dropout(l_conv_pool2, num_hidden_units=dense_num_hidden_units)
 
 
 def _build_dense_plus_dropout(incoming_layer, num_hidden_units):
