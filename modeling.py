@@ -89,7 +89,8 @@ class AbstractModelBuilder(object):
 
     def _create_eval_function(self, subset_name, output_layer):
         """Return a function that returns the loss and accuracy of the given network on the given dataset's subset."""
-        instances_var, labels_var = (theano.shared(_) for _ in self.dataset[subset_name])
+        instances_var = T.cast(theano.shared(self.dataset[subset_name][0]), theano.config.floatX)
+        labels_var = theano.shared(self.dataset[subset_name][1])
         theano_function = self._create_theano_eval_function(instances_var, labels_var, output_layer)
         num_validation_batches = self.dataset[subset_name][0].shape[0] // self.batch_size
 
@@ -123,9 +124,8 @@ class AbstractModelBuilder(object):
         )
 
     def _create_batch_vars(self):
-        # TODO: is there a better way of doing this?
-        input_dim_to_tensor_type = {2: T.matrix, 4: T.tensor4}
-        return T.iscalar('batch_index'), input_dim_to_tensor_type[len(self.input_shape)]('x'), T.ivector('y')
+        batch_instances_var_type = T.TensorType(theano.config.floatX, [False] * len(self.input_shape))
+        return T.iscalar('batch_index'), batch_instances_var_type('x'), T.ivector('y')
 
     def _create_batch_givens(self, instances_var, labels_var, batch_index_var, batch_instances_var, batch_labels_var):
         batch_slice = slice(batch_index_var * self.batch_size, (batch_index_var + 1) * self.batch_size)

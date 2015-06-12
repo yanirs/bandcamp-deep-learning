@@ -109,8 +109,25 @@ def _get_filename_genre(filename):
     return filename.split('/')[-2]
 
 
+def _read_image(filename, as_grey, flatten):
+    image_arr = imread(filename, as_grey=as_grey)
+    if not as_grey:
+        # Convert greyscale images to RGB
+        if len(image_arr.shape) == 2:
+            image_arr = gray2rgb(image_arr)
+        # Reshape image from (height, width, num_channels) to (num_channels, height, width)
+        image_arr = image_arr.transpose(2, 0, 1)
+    if flatten:
+        image_arr = image_arr.flatten()
+    return image_arr
+
+
 def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True, flatten=True):
     """Return a mapping from training/validation/testing to (<instances>, <labels>), and a label to index mapping."""
+    if not as_grey:
+        expected_image_shape = (3, ) + tuple(expected_image_shape)
+    if flatten:
+        expected_image_shape = (np.product(expected_image_shape), )
 
     with open(dataset_json, 'rb') as in_file:
         dataset_filenames = json.load(in_file)
@@ -119,20 +136,15 @@ def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True
                       enumerate(sorted({_get_filename_genre(filename) for filename in dataset_filenames['training']}))}
     dataset = {}
     for subset, filenames in dataset_filenames.iteritems():
-        instances = []
-        labels = []
-        for filename in filenames:
-            image_arr = imread(filename, as_grey=as_grey)
-            assert image_arr.shape[:2] == expected_image_shape, '%s has shape %s' % (filename, image_arr.shape)
-            if not as_grey:
-                # Convert greyscale images to RGB
-                if len(image_arr.shape) == 2:
-                    image_arr = gray2rgb(image_arr)
-                # Reshape image from (height, width, num_channels) to (num_channels, height, width)
-                image_arr = image_arr.transpose(2, 0, 1)
-            instances.append(image_arr.flatten() if flatten else image_arr)
-            labels.append(label_to_index[_get_filename_genre(filename)])
-        dataset[subset] = (np.array(instances, dtype='float32'), np.array(labels, dtype='int32'))
+        instances = np.zeros(shape=(len(filenames), ) + expected_image_shape,
+                             dtype='float32' if as_grey else 'uint8')
+        labels = np.zeros(shape=len(filenames), dtype='int32')
+        for i, filename in enumerate(filenames):
+            image_arr = _read_image(filename, as_grey, flatten)
+            assert image_arr.shape == expected_image_shape, '%s has shape %s' % (filename, image_arr.shape)
+            instances[i] = image_arr
+            labels[i] = label_to_index[_get_filename_genre(filename)]
+        dataset[subset] = (instances, labels)
 
     return dataset, label_to_index
 
