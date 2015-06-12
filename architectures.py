@@ -9,8 +9,8 @@ from modeling import AbstractModelBuilder
 class SingleLayerMlp(AbstractModelBuilder):
     """Builder of a multi-layer perceptron with a single hidden layer and a user-specified number of hidden units."""
 
-    def _build_middle(self, l_in, num_hidden_units=512, **_):
-        return DenseLayer(l_in, num_units=num_hidden_units)
+    def _build_middle(self, l_in, num_units=512, **_):
+        return DenseLayer(l_in, num_units=num_units)
 
 
 class LasagneMnistExample(AbstractModelBuilder):
@@ -19,8 +19,8 @@ class LasagneMnistExample(AbstractModelBuilder):
     The network's architecture is: in -> dense -> dropout -> dense -> dropout -> out.
     """
 
-    def _build_middle(self, l_in, num_hidden_units=512, **_):
-        return _build_dense_plus_dropout(_build_dense_plus_dropout(l_in, num_hidden_units), num_hidden_units)
+    def _build_middle(self, l_in, num_units=512, **_):
+        return _build_dense_plus_dropout(_build_dense_plus_dropout(l_in, num_units), num_units)
 
 
 class ConvNet(AbstractModelBuilder):
@@ -34,14 +34,15 @@ class ConvNet(AbstractModelBuilder):
                                      'reshape data or use RGB format?'
         l_bottom = l_in
         for i in xrange(num_conv_layers):
-            l_bottom = _build_conv_plus_max_pool(l_bottom,
-                                                 num_filters=kwargs['lc%d_num_filters' % i],
-                                                 filter_size=kwargs['lc%d_filter_size' % i],
-                                                 pool_size=kwargs['lc%d_pool_size' % i])
+            l_bottom = Conv2DLayer(l_bottom, **self._extract_layer_kwargs('c', i, kwargs))
+            l_bottom = MaxPool2DLayer(l_bottom, **self._extract_layer_kwargs('m', i, kwargs))
         for i in xrange(num_dense_layers):
-            l_bottom = _build_dense_plus_dropout(l_bottom,
-                                                 num_hidden_units=kwargs['ld%d_num_hidden_units' % i])
+            l_bottom = _build_dense_plus_dropout(l_bottom, **self._extract_layer_kwargs('d', i, kwargs))
         return l_bottom
+
+    def _extract_layer_kwargs(self, layer_letter, layer_index, kwargs):
+        return {k.split('_', 1)[1]: v for k, v in kwargs.iteritems()
+                if k.startswith('l%s%d' % (layer_letter, layer_index))}
 
 
 class LasagneMnistConvExample(ConvNet):
@@ -54,19 +55,16 @@ class LasagneMnistConvExample(ConvNet):
     def _build_middle(self, l_in, **_):
         return super(LasagneMnistConvExample, self)._build_middle(
             l_in, num_conv_layers=2, num_dense_layers=1,
-            lc0_num_filters=32, lc0_filter_size=(5, 5), lc0_pool_size=(2, 2),
-            lc1_num_filters=32, lc1_filter_size=(5, 5), lc1_pool_size=(2, 2),
-            ld0_num_hidden_units=256
+            lc0_num_filters=32, lc0_filter_size=(5, 5),
+            lm0_pool_size=(2, 2),
+            lc1_num_filters=32, lc1_filter_size=(5, 5),
+            lm1_pool_size=(2, 2),
+            ld0_num_units=256
         )
 
 
-def _build_dense_plus_dropout(incoming_layer, num_hidden_units):
-    return DropoutLayer(DenseLayer(incoming_layer, num_units=num_hidden_units), p=0.5)
-
-
-def _build_conv_plus_max_pool(incoming_layer, num_filters, filter_size, pool_size):
-    return MaxPool2DLayer(Conv2DLayer(incoming_layer, num_filters=num_filters, filter_size=filter_size),
-                          pool_size=pool_size)
+def _build_dense_plus_dropout(incoming_layer, num_units):
+    return DropoutLayer(DenseLayer(incoming_layer, num_units=num_units), p=0.5)
 
 
 # A bit of Python magic to publish the available architectures.

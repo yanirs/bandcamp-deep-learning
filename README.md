@@ -52,7 +52,7 @@ dataset as above):
 
     $ THEANO_FLAGS=floatX=float32 python manage.py run_experiment \
         --dataset-path ~/data/local.pkl.zip --model-architecture SingleLayerMlp \
-        --model-params num_hidden_units=256
+        --model-params num_units=256
 
 See notebooks for some examples and experimental results (though the notebooks may not be runnable due to recent code
 changes).

@@ -81,7 +81,7 @@ def _print_network_info(output_layer):
         init_kwargs = _get_default_init_kwargs(layer)
         filtered_params = {}
         for key, value in layer.__dict__.iteritems():
-            if key in ('name', 'input_var', 'input_layer', 'W', 'b', 'params') or \
+            if key.startswith('_') or key in ('name', 'input_var', 'input_layer', 'W', 'b', 'params') or \
                (key in init_kwargs and init_kwargs[key] == value):
                 continue
             if isinstance(value, FunctionType):
