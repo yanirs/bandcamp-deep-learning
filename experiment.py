@@ -1,6 +1,8 @@
 from ast import literal_eval
+import inspect
 from time import time
 import sys
+from types import FunctionType
 
 from commandr import command
 import lasagne
@@ -41,7 +43,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
         learning_rate=learning_rate
     )
     output_layer, training_iter, validation_eval = model_builder.build(**_parse_model_params(model_params))
-    print('Network has {:,} parameters'.format(lasagne.layers.count_params(output_layer)))
+    _print_network_info(output_layer)
     _run_training_loop(training_iter, validation_eval, num_epochs)
 
 
@@ -66,6 +68,27 @@ def _parse_model_params(model_params):
                 param_kwargs[key] = value
         print('Parsed model params: {}'.format(param_kwargs))
     return param_kwargs
+
+
+def _get_default_init_kwargs(obj):
+    args, _, _, defaults = inspect.getargspec(obj.__init__)
+    return dict(zip(reversed(args), reversed(defaults)))
+
+
+def _print_network_info(output_layer):
+    print('Network architecture ({:,} parameters overall):'.format(lasagne.layers.count_params(output_layer)))
+    for layer in lasagne.layers.get_all_layers(output_layer):
+        init_kwargs = _get_default_init_kwargs(layer)
+        filtered_params = {}
+        for key, value in layer.__dict__.iteritems():
+            if key in ('name', 'input_var', 'input_layer', 'W', 'b', 'params') or \
+               (key in init_kwargs and init_kwargs[key] == value):
+                continue
+            if isinstance(value, FunctionType):
+                value = value.__name__
+            filtered_params[key] = value
+        print('\t%s(%s)' % (layer.__class__.__name__,
+                            ', '.join('%s=%s' % (k, v) for k, v in sorted(filtered_params.iteritems()))))
 
 
 def _run_training_loop(training_iter, validation_eval, num_epochs):
