@@ -23,23 +23,41 @@ class LasagneMnistExample(AbstractModelBuilder):
         return _build_dense_plus_dropout(_build_dense_plus_dropout(l_in, num_hidden_units), num_hidden_units)
 
 
-class LasagneMnistConvExample(AbstractModelBuilder):
+class ConvNet(AbstractModelBuilder):
+    """Builder of a convnet architecture with a user-specified number of convolutional layers and dense layers.
+
+    Every convolutional layer is followed by a max pool layer, and every dense layer is followed by a dropout layer.
+    """
+
+    def _build_middle(self, l_in, num_conv_layers=1, num_dense_layers=1, **kwargs):
+        assert len(l_in.shape) == 4, 'InputLayer shape must be (batch_size, channels, width, height) -- ' \
+                                     'reshape data or use RGB format?'
+        l_bottom = l_in
+        for i in xrange(num_conv_layers):
+            l_bottom = _build_conv_plus_max_pool(l_bottom,
+                                                 num_filters=kwargs['lc%d_num_filters' % i],
+                                                 filter_size=kwargs['lc%d_filter_size' % i],
+                                                 pool_size=kwargs['lc%d_pool_size' % i])
+        for i in xrange(num_dense_layers):
+            l_bottom = _build_dense_plus_dropout(l_bottom,
+                                                 num_hidden_units=kwargs['ld%d_num_hidden_units' % i])
+        return l_bottom
+
+
+class LasagneMnistConvExample(ConvNet):
     """Builder of Lasagne's MNIST basic CNN example (examples/mnist_conv.py).
 
     The network's architecture is: in -> conv(5, 5) x 32 -> max-pool(2, 2) -> conv(5, 5) x 32 -> max-pool(2, 2) ->
                                    dense (256) -> dropout -> out.
     """
 
-    def _build_middle(self, l_in, l1_num_filters=32, l1_filter_size=(5, 5), l1_pool_size=(2, 2),
-                      l2_num_filters=32, l2_filter_size=(5, 5), l2_pool_size=(2, 2), dense_num_hidden_units=256, **_):
-        assert len(l_in.shape) == 4, 'InputLayer shape must be (batch_size, channels, width, height) -- reshape data?'
-        l_conv_pool1 = _build_conv_plus_max_pool(
-            l_in, num_filters=l1_num_filters, filter_size=l1_filter_size, pool_size=l1_pool_size
+    def _build_middle(self, l_in, **_):
+        return super(LasagneMnistConvExample, self)._build_middle(
+            l_in, num_conv_layers=2, num_dense_layers=1,
+            lc0_num_filters=32, lc0_filter_size=(5, 5), lc0_pool_size=(2, 2),
+            lc1_num_filters=32, lc1_filter_size=(5, 5), lc1_pool_size=(2, 2),
+            ld0_num_hidden_units=256
         )
-        l_conv_pool2 = _build_conv_plus_max_pool(
-            l_conv_pool1, num_filters=l2_num_filters, filter_size=l2_filter_size, pool_size=l2_pool_size
-        )
-        return _build_dense_plus_dropout(l_conv_pool2, num_hidden_units=dense_num_hidden_units)
 
 
 def _build_dense_plus_dropout(incoming_layer, num_hidden_units):
