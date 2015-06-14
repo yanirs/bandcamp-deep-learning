@@ -26,21 +26,31 @@ class LasagneMnistExample(AbstractModelBuilder):
 class ConvNet(AbstractModelBuilder):
     """Builder of a convnet architecture with a user-specified number of convolutional layers and dense layers.
 
-    Every convolutional layer is followed by a max pool layer, and every dense layer is followed by a dropout layer.
+    Every conv_pool_ratio convolutional layers are followed by a max pool layer, and every dense layer is followed by a
+    dropout layer.
     """
 
-    def _build_middle(self, l_in, num_conv_layers=1, num_dense_layers=1, **kwargs):
+    def _build_middle(self, l_in, num_conv_layers=1, num_dense_layers=1, conv_pool_ratio=1, **kwargs):
         assert len(l_in.shape) == 4, 'InputLayer shape must be (batch_size, channels, width, height) -- ' \
                                      'reshape data or use RGB format?'
+        assert num_conv_layers % conv_pool_ratio == 0
+
         l_bottom = l_in
         for i in xrange(num_conv_layers):
-            l_bottom = Conv2DLayer(l_bottom, **self._extract_layer_kwargs('c', i, kwargs))
-            max_pool_kwargs = self._extract_layer_kwargs('m', i, kwargs)
-            if 'pool_size' not in max_pool_kwargs:
-                max_pool_kwargs['pool_size'] = (2, 2)
-            l_bottom = MaxPool2DLayer(l_bottom, **max_pool_kwargs)
+            conv_kwargs = self._extract_layer_kwargs('c', i, kwargs)
+            if 'border_mode' not in conv_kwargs:
+                conv_kwargs['border_mode'] = 'full'
+            l_bottom = Conv2DLayer(l_bottom, **conv_kwargs)
+
+            if (i + 1) % conv_pool_ratio == 0:
+                max_pool_kwargs = self._extract_layer_kwargs('m', i / conv_pool_ratio, kwargs)
+                if 'pool_size' not in max_pool_kwargs:
+                    max_pool_kwargs['pool_size'] = (2, 2)
+                l_bottom = MaxPool2DLayer(l_bottom, **max_pool_kwargs)
+
         for i in xrange(num_dense_layers):
             l_bottom = _build_dense_plus_dropout(l_bottom, **self._extract_layer_kwargs('d', i, kwargs))
+
         return l_bottom
 
     def _extract_layer_kwargs(self, layer_letter, layer_index, kwargs):
