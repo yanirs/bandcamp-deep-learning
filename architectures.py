@@ -1,7 +1,12 @@
 import inspect
 import sys
 
-from lasagne.layers import Conv2DLayer, DenseLayer, DropoutLayer, MaxPool2DLayer
+try:
+    from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
+    from lasagne.layers.dnn import MaxPool2DDNNLayer as MaxPool2DLayer
+except ImportError:
+    from lasagne.layers import Conv2DLayer, MaxPool2DLayer
+from lasagne.layers import DenseLayer, DropoutLayer
 
 from modeling import AbstractModelBuilder
 
