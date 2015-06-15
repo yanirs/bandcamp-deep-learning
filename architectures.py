@@ -1,6 +1,7 @@
 import inspect
 import sys
 
+from lasagne.init import HeUniform
 try:
     from lasagne.layers.dnn import Conv2DDNNLayer as Conv2DLayer
     from lasagne.layers.dnn import MaxPool2DDNNLayer as MaxPool2DLayer
@@ -15,7 +16,7 @@ class SingleLayerMlp(AbstractModelBuilder):
     """Builder of a multi-layer perceptron with a single hidden layer and a user-specified number of hidden units."""
 
     def _build_middle(self, l_in, num_units=512, **_):
-        return DenseLayer(l_in, num_units=num_units)
+        return DenseLayer(l_in, num_units=num_units, W=HeUniform(gain='relu'))
 
 
 class LasagneMnistExample(AbstractModelBuilder):
@@ -45,7 +46,7 @@ class ConvNet(AbstractModelBuilder):
             if 'border_mode' not in conv_kwargs:
                 conv_kwargs['border_mode'] = 'same'
             has_max_pool = conv_kwargs.pop('mp', False)
-            l_bottom = Conv2DLayer(l_bottom, **conv_kwargs)
+            l_bottom = Conv2DLayer(l_bottom, W=HeUniform(gain='relu'), **conv_kwargs)
 
             if has_max_pool:
                 max_pool_kwargs = self._extract_layer_kwargs('m', i, kwargs)
@@ -110,7 +111,7 @@ class VggNet(ConvNet):
 
 
 def _build_dense_plus_dropout(incoming_layer, num_units):
-    return DropoutLayer(DenseLayer(incoming_layer, num_units=num_units), p=0.5)
+    return DropoutLayer(DenseLayer(incoming_layer, num_units=num_units, W=HeUniform(gain='relu')), p=0.5)
 
 
 # A bit of Python magic to publish the available architectures.
