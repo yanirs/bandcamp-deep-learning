@@ -13,6 +13,7 @@ import numpy as np
 import requests
 from skimage.color import gray2rgb
 from skimage.io import imread
+from skimage.transform import resize
 from theano_latest.misc import pkl_utils
 
 
@@ -159,3 +160,22 @@ def download_mnist(data_dir):
     label_to_index = dict(zip(range(10), range(10)))
     with open(os.path.join(data_dir, 'mnist.pkl.zip'), 'wb') as out:
         pkl_utils.dump((dataset, label_to_index), out)
+
+
+@command
+def resize_rgb_dataset(in_filename, out_filename, x_size=0, y_size=0):
+    """Resize an RGB dataset so that every image is of the given shape."""
+    with open(in_filename, 'rb') as dataset_file:
+        in_dataset, label_to_index = pkl_utils.load(dataset_file)
+
+    shape = (x_size, y_size)
+    out_dataset = {}
+    for subset, (instances, labels) in in_dataset.iteritems():
+        resized_instances = np.zeros(shape=(len(instances), 3) + shape, dtype=instances.dtype)
+        for i, instance in enumerate(instances):
+            # Transpose the image to (height, width, channels), resize, transpose back, and multiply by 255 to get uint8
+            resized_instances[i] = resize(instance.transpose(1, 2, 0), shape).transpose(2, 0, 1) * 255
+        out_dataset[subset] = (resized_instances, labels)
+
+    with open(out_filename, 'wb') as out:
+        pkl_utils.dump((out_dataset, label_to_index), out)
