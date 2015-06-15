@@ -76,7 +76,9 @@ def _get_default_init_kwargs(obj):
 
 
 def _print_network_info(output_layer):
-    print('Network architecture ({:,} parameters overall):'.format(lasagne.layers.count_params(output_layer)))
+    print('Network architecture:')
+    sum_params = 0
+    sum_memory = 0.0
     for layer in lasagne.layers.get_all_layers(output_layer):
         init_kwargs = _get_default_init_kwargs(layer)
         filtered_params = {}
@@ -87,8 +89,14 @@ def _print_network_info(output_layer):
             if isinstance(value, FunctionType):
                 value = value.__name__
             filtered_params[key] = value
-        print('\t%s(%s)' % (layer.__class__.__name__,
-                            ', '.join('%s=%s' % (k, v) for k, v in sorted(filtered_params.iteritems()))))
+        layer_args = ', '.join('%s=%s' % (k, v) for k, v in sorted(filtered_params.iteritems()))
+        num_layer_params = sum(np.prod(p.get_value().shape) for p in layer.get_params())
+        layer_memory = np.prod(layer.output_shape) * 4 / 2. ** 20
+        print('\t{:}({:}): {:,} parameters {:.2f}MB'.format(layer.__class__.__name__, layer_args, num_layer_params,
+                                                            layer_memory))
+        sum_params += num_layer_params
+        sum_memory += layer_memory
+    print('Sums: {:,} parameters {:.2f}MB'.format(sum_params, sum_memory))
 
 
 def _run_training_loop(training_iter, validation_eval, num_epochs):
