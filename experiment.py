@@ -15,7 +15,7 @@ from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=500, batch_size=100,
-                   training_chunk_size=0, reshape_to=None, learning_rate=0.01):
+                   training_chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -31,13 +31,15 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * reshape_to (str) - if given, the data will be reshaped to match this string, which should evaluate to a Python
                           tuple of ints (e.g., may be required to make the dataset fit into a convnet input layer)
      * learning_rate (float) - learning rate to use for training the network
+     * subtract_mean (bool) - if True, the mean RGB value in the training set will be subtracted from all subsets
+                              of the dataset
     """
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if not model_architecture in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
                                                                          sorted(ARCHITECTURE_NAME_TO_CLASS)))
 
-    dataset, label_to_index = _load_data(dataset_path, reshape_to)
+    dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean)
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, training_chunk_size=training_chunk_size,
         learning_rate=learning_rate
@@ -47,13 +49,17 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     _run_training_loop(training_iter, validation_eval, num_epochs)
 
 
-def _load_data(dataset_path, reshape_to):
+def _load_data(dataset_path, reshape_to, subtract_mean):
     with open(dataset_path, 'rb') as dataset_file:
         dataset, label_to_index = pkl_utils.load(dataset_file)
     if reshape_to:
         reshape_to = literal_eval(reshape_to)
         for subset_name, (data, labels) in dataset.iteritems():
-            dataset[subset_name] = data.reshape((data.shape[0], ) + reshape_to), labels
+            dataset[subset_name] = (data.reshape((data.shape[0], ) + reshape_to), labels)
+    if subtract_mean:
+        training_mean = np.mean(dataset['training'][0], dtype='float32')
+        for subset_name, (data, labels) in dataset.iteritems():
+            dataset[subset_name] = (data - training_mean, labels)
     return dataset, label_to_index
 
 
@@ -91,7 +97,7 @@ def _print_network_info(output_layer):
             filtered_params[key] = value
         layer_args = ', '.join('%s=%s' % (k, v) for k, v in sorted(filtered_params.iteritems()))
         num_layer_params = sum(np.prod(p.get_value().shape) for p in layer.get_params())
-        layer_memory = np.prod(layer.output_shape) * 4 / 2. ** 20
+        layer_memory = (np.prod(layer.output_shape) + num_layer_params) * 4 / 2. ** 20
         print('\t{:}({:}): {:,} parameters {:.2f}MB'.format(layer.__class__.__name__, layer_args, num_layer_params,
                                                             layer_memory))
         sum_params += num_layer_params
