@@ -7,6 +7,7 @@ from types import FunctionType
 from commandr import command
 import lasagne
 import numpy as np
+from sklearn.ensemble import RandomForestClassifier
 import theano
 from theano_latest.misc import pkl_utils
 
@@ -47,6 +48,19 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     output_layer, training_iter, validation_eval = model_builder.build(**_parse_model_params(model_params))
     _print_network_info(output_layer)
     _run_training_loop(training_iter, validation_eval, num_epochs)
+
+
+@command
+def run_random_forest_baseline(dataset_path, n_estimators=100, random_state=0):
+    """Run a random forest classifier on the dataset, printing the validation subset accuracy."""
+    dataset, _ = _load_data(dataset_path, reshape_to=None, subtract_mean=False)
+    # Flatten the dataset if needed
+    for subset_name, (data, labels) in dataset.iteritems():
+        if len(data.shape) > 2:
+            dataset[subset_name] = (data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
+    estimator = RandomForestClassifier(n_jobs=-1, random_state=random_state, n_estimators=n_estimators)
+    estimator.fit(*dataset['training'])
+    print('Validation accuracy: {:.2f}%'.format(100 * estimator.score(*dataset['validation'])))
 
 
 def _load_data(dataset_path, reshape_to, subtract_mean):
