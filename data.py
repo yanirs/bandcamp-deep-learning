@@ -66,7 +66,7 @@ def collect_dataset_filenames(image_dir, out_dir, local_ratio=0.1, training_rati
     datasets_by_name = dict(full=defaultdict(list), local=defaultdict(list))
 
     random.seed(random_seed)
-    for root, _, filenames in os.walk(image_dir):
+    for root, _, filenames in sorted(os.walk(image_dir)):
         filenames.sort()
         random.shuffle(filenames)
         training_high = len(filenames) * training_ratio
