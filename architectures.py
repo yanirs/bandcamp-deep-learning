@@ -32,8 +32,8 @@ class LasagneMnistExample(AbstractModelBuilder):
 class ConvNet(AbstractModelBuilder):
     """Builder of a convnet architecture with a user-specified number of convolutional layers and dense layers.
 
-    Every convolutional layer is optionally followed by a max pool layer, and every dense layer is followed by a
-    dropout layer.
+    Every convolutional layer is optionally followed by a max pool layer, and every dense layer is optionally followed
+    by a dropout layer.
     """
 
     def _build_middle(self, l_in, num_conv_layers=1, num_dense_layers=1, **kwargs):
@@ -55,7 +55,11 @@ class ConvNet(AbstractModelBuilder):
                 l_bottom = MaxPool2DLayer(l_bottom, **max_pool_kwargs)
 
         for i in xrange(num_dense_layers):
-            l_bottom = _build_dense_plus_dropout(l_bottom, **self._extract_layer_kwargs('d', i, kwargs))
+            dense_kwargs = self._extract_layer_kwargs('d', i, kwargs)
+            has_dropout = dense_kwargs.pop('hd', True)
+            l_bottom = DenseLayer(l_bottom, W=HeUniform(gain='relu'), **dense_kwargs)
+            if has_dropout:
+                l_bottom = DropoutLayer(l_bottom, p=0.5)
 
         return l_bottom
 
