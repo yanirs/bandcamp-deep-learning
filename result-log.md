@@ -11,11 +11,14 @@ in the latter each feature was normalised to [0, 1] range. See `experiment.run_r
 
 Algorithm       | MNIST digits | Local (grayscale) | Full (grayscale) | Full (rgb 50x50) | Full (rgb 100x100) 
 ----------------|--------------|-------------------|------------------|------------------|-------------------
-Linear SVM      | 92.09%       | 17%               | Memory issues    |                  | 11.10%
+Linear SVM      | 92.09%       | 17%               | Memory issues    | 11.10%           | 11.50%
 RF (100 trees)  | 97.19±0.08%  | 11.70±2.10%       | 13.95±1.09%      | 13.90%           | 14.70%
 RF (1000 trees) | 97.42±0.02%  | 13.50±1.57%       | 14.87±0.84%      | 14.90%           | 15%
 
 ##Caffe-based models
+
+All of the following results are on the full RGB dataset. The full-scale images (350x350) were used, with Caffe being
+resposible for model-specific downscaling, cropping and reflection.
 
 **Feature extraction**: extracted features from the highest dense layer that's not specific to ImageNet -- 4,096
 activations in [CaffeNet](http://caffe.berkeleyvision.org/model_zoo.html) and
