@@ -55,25 +55,23 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 
 
 @command
-def run_random_forest_baseline(dataset_path, n_estimators=100, random_state=0, num_iter=10):
-    """Run a random forest classifier on the dataset, printing the validation subset accuracy."""
+def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=0, rf_num_iter=10):
+    """Run a baseline classifier (random_forest or linear) on the dataset, printing the validation subset accuracy."""
     dataset, _ = _load_data(dataset_path, flatten=True)
-    rnd = Random(random_state)
-    scores = []
-    for _ in xrange(num_iter):
-        estimator = RandomForestClassifier(n_jobs=-1, random_state=hash(rnd.random()), n_estimators=n_estimators)
+    if baseline_name == 'random_forest':
+        rnd = Random(random_state)
+        scores = []
+        for _ in xrange(rf_num_iter):
+            estimator = RandomForestClassifier(n_jobs=-1, random_state=hash(rnd.random()), n_estimators=rf_n_estimators)
+            estimator.fit(*dataset['training'])
+            scores.append(estimator.score(*dataset['validation']))
+        print('Validation accuracy: {:.4f} (std: {:.4f})'.format(np.mean(scores), np.std(scores)))
+    elif baseline_name == 'linear':
+        estimator = Pipeline([('scaler', MinMaxScaler()), ('svc', LinearSVC(random_state=random_state))])
         estimator.fit(*dataset['training'])
-        scores.append(estimator.score(*dataset['validation']))
-    print('Validation accuracy: {:.4f} (std: {:.4f})'.format(np.mean(scores), np.std(scores)))
-
-
-@command
-def run_linear_baseline(dataset_path):
-    """Run a linear classifier baseline on the dataset, printing the validation subset accuracy."""
-    dataset, _ = _load_data(dataset_path, flatten=True)
-    estimator = Pipeline([('scaler', MinMaxScaler()), ('svc', LinearSVC(random_state=0))])
-    estimator.fit(*dataset['training'])
-    print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
+        print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
+    else:
+        raise ValueError('Unknown baseline_name %s (supported values: random_forest, linear)' % baseline_name)
 
 
 def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False):
