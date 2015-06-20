@@ -30,7 +30,7 @@ def setup_virtualenv():
 
 def package_and_upload_project():
     """Package the project and upload it to the remote environment."""
-    local(r'7z a -x@.gitignore -x\!.git/ -r deploy.7z ./')
+    local(r'7z a -x@.gitignore -x\!.git/ -x\!\*.ipynb -r deploy.7z ./')
     run('rm -rf %s-prev' % env.project_name)
     if files.exists(env.project_name):
         run('mv %s %s-prev' % (env.project_name, env.project_name))
