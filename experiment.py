@@ -1,5 +1,6 @@
 from ast import literal_eval
 import inspect
+from random import Random
 from time import time
 import sys
 from types import FunctionType
@@ -51,16 +52,20 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 
 
 @command
-def run_random_forest_baseline(dataset_path, n_estimators=100, random_state=0):
+def run_random_forest_baseline(dataset_path, n_estimators=100, random_state=0, num_iter=10):
     """Run a random forest classifier on the dataset, printing the validation subset accuracy."""
     dataset, _ = _load_data(dataset_path, reshape_to=None, subtract_mean=False)
     # Flatten the dataset if needed
     for subset_name, (data, labels) in dataset.iteritems():
         if len(data.shape) > 2:
             dataset[subset_name] = (data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
-    estimator = RandomForestClassifier(n_jobs=-1, random_state=random_state, n_estimators=n_estimators)
-    estimator.fit(*dataset['training'])
-    print('Validation accuracy: {:.2f}%'.format(100 * estimator.score(*dataset['validation'])))
+    rnd = Random(random_state)
+    scores = []
+    for _ in xrange(num_iter):
+        estimator = RandomForestClassifier(n_jobs=-1, random_state=hash(rnd.random()), n_estimators=n_estimators)
+        estimator.fit(*dataset['training'])
+        scores.append(estimator.score(*dataset['validation']))
+    print('Validation accuracy: {:.4f} (std: {:.4f})'.format(np.mean(scores), np.std(scores)))
 
 
 def _load_data(dataset_path, reshape_to, subtract_mean):
