@@ -9,6 +9,9 @@ from commandr import command
 import lasagne
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.svm import LinearSVC
 import theano
 from theano_latest.misc import pkl_utils
 
@@ -54,11 +57,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 @command
 def run_random_forest_baseline(dataset_path, n_estimators=100, random_state=0, num_iter=10):
     """Run a random forest classifier on the dataset, printing the validation subset accuracy."""
-    dataset, _ = _load_data(dataset_path, reshape_to=None, subtract_mean=False)
-    # Flatten the dataset if needed
-    for subset_name, (data, labels) in dataset.iteritems():
-        if len(data.shape) > 2:
-            dataset[subset_name] = (data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
+    dataset, _ = _load_data(dataset_path, flatten=True)
     rnd = Random(random_state)
     scores = []
     for _ in xrange(num_iter):
@@ -68,7 +67,16 @@ def run_random_forest_baseline(dataset_path, n_estimators=100, random_state=0, n
     print('Validation accuracy: {:.4f} (std: {:.4f})'.format(np.mean(scores), np.std(scores)))
 
 
-def _load_data(dataset_path, reshape_to, subtract_mean):
+@command
+def run_linear_baseline(dataset_path):
+    """Run a linear classifier baseline on the dataset, printing the validation subset accuracy."""
+    dataset, _ = _load_data(dataset_path, flatten=True)
+    estimator = Pipeline([('scaler', MinMaxScaler()), ('svc', LinearSVC(random_state=0))])
+    estimator.fit(*dataset['training'])
+    print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
+
+
+def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False):
     with open(dataset_path, 'rb') as dataset_file:
         dataset, label_to_index = pkl_utils.load(dataset_file)
     if reshape_to:
@@ -79,6 +87,10 @@ def _load_data(dataset_path, reshape_to, subtract_mean):
         training_mean = np.mean(dataset['training'][0], dtype='float32')
         for subset_name, (data, labels) in dataset.iteritems():
             dataset[subset_name] = (data - training_mean, labels)
+    if flatten:
+        for subset_name, (data, labels) in dataset.iteritems():
+            if len(data.shape) > 2:
+                dataset[subset_name] = (data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
     return dataset, label_to_index
 
 
