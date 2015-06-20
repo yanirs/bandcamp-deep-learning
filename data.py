@@ -88,6 +88,16 @@ def collect_dataset_filenames(image_dir, out_dir, local_ratio=0.1, training_rati
     return dataset_name_to_path
 
 
+def convert_dataset_json_to_csvs(dataset_json, out_prefix):
+    """Convert a JSON of dataset filenames as created by collect_dataset_filenames to flat files for Caffe."""
+    dataset_filenames, label_to_index = _load_dataset_filenames(dataset_json)
+    for subset, filenames in dataset_filenames.iteritems():
+        with open('%s.%s.csv' % (out_prefix, subset), 'wb') as out_file:
+            for filename in filenames:
+                label = label_to_index[_get_filename_genre(filename)]
+                out_file.write('%s %s\n' % (filename, label))
+
+
 @command
 def create_datasets(image_dir, out_dir, skip_full_pickle=False):
     """Create the dataset pickles and JSONs.
@@ -110,6 +120,14 @@ def _get_filename_genre(filename):
     return filename.split('/')[-2]
 
 
+def _load_dataset_filenames(dataset_json):
+    with open(dataset_json, 'rb') as in_file:
+        dataset_filenames = json.load(in_file)
+    label_to_index = {v: k for k, v in
+                      enumerate(sorted({_get_filename_genre(filename) for filename in dataset_filenames['training']}))}
+    return dataset_filenames, label_to_index
+
+
 def _read_image(filename, as_grey, flatten):
     image_arr = imread(filename, as_grey=as_grey)
     if not as_grey:
@@ -130,11 +148,7 @@ def load_raw_dataset(dataset_json, expected_image_shape=(350, 350), as_grey=True
     if flatten:
         expected_image_shape = (np.product(expected_image_shape), )
 
-    with open(dataset_json, 'rb') as in_file:
-        dataset_filenames = json.load(in_file)
-
-    label_to_index = {v: k for k, v in
-                      enumerate(sorted({_get_filename_genre(filename) for filename in dataset_filenames['training']}))}
+    dataset_filenames, label_to_index = _load_dataset_filenames(dataset_json)
     dataset = {}
     for subset, filenames in dataset_filenames.iteritems():
         instances = np.zeros(shape=(len(filenames), ) + expected_image_shape,
