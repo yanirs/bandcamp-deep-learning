@@ -20,7 +20,8 @@ from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=500, batch_size=100,
-                   training_chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True):
+                   training_chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True,
+                   labels_to_keep=None):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -38,13 +39,14 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * learning_rate (float) - learning rate to use for training the network
      * subtract_mean (bool) - if True, the mean RGB value in the training set will be subtracted from all subsets
                               of the dataset
+     * labels_to_keep (str) - comma-separated list of labels to keep -- all other labels will be dropped
     """
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if not model_architecture in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
                                                                          sorted(ARCHITECTURE_NAME_TO_CLASS)))
 
-    dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean)
+    dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean, labels_to_keep=labels_to_keep)
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, training_chunk_size=training_chunk_size,
         learning_rate=learning_rate
@@ -55,9 +57,9 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 
 
 @command
-def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=0, rf_num_iter=10):
+def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=0, rf_num_iter=10, labels_to_keep=None):
     """Run a baseline classifier (random_forest or linear) on the dataset, printing the validation subset accuracy."""
-    dataset, _ = _load_data(dataset_path, flatten=True)
+    dataset, _ = _load_data(dataset_path, flatten=True, labels_to_keep=labels_to_keep)
     if baseline_name == 'random_forest':
         rnd = Random(random_state)
         scores = []
@@ -74,21 +76,36 @@ def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=
         raise ValueError('Unknown baseline_name %s (supported values: random_forest, linear)' % baseline_name)
 
 
-def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False):
+def _transform_dataset(dataset, func):
+    for subset_name, (data, labels) in dataset.iteritems():
+        dataset[subset_name] = func(data, labels)
+
+
+def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False, labels_to_keep=()):
     with open(dataset_path, 'rb') as dataset_file:
         dataset, label_to_index = pkl_utils.load(dataset_file)
+    if labels_to_keep:
+        labels_to_keep = set(labels_to_keep.split(','))
+        unknown_labels = labels_to_keep.difference(label_to_index)
+        if unknown_labels:
+            raise ValueError('Unknown labels passed %s' % unknown_labels)
+        label_to_index = {l: i for l, i in label_to_index.iteritems() if l in labels_to_keep}
+        label_indexes_to_keep = label_to_index.values()
+
+        def drop_labels(data, labels):
+            ind = np.in1d(labels, label_indexes_to_keep)
+            return data[ind], labels[ind]
+        _transform_dataset(dataset, drop_labels)
     if reshape_to:
         reshape_to = literal_eval(reshape_to)
-        for subset_name, (data, labels) in dataset.iteritems():
-            dataset[subset_name] = (data.reshape((data.shape[0], ) + reshape_to), labels)
+        _transform_dataset(dataset, lambda data, labels: (data.reshape((data.shape[0], ) + reshape_to), labels))
     if subtract_mean:
         training_mean = np.mean(dataset['training'][0], dtype='float32')
-        for subset_name, (data, labels) in dataset.iteritems():
-            dataset[subset_name] = (data - training_mean, labels)
+        _transform_dataset(dataset, lambda data, labels: (data - training_mean, labels))
     if flatten:
-        for subset_name, (data, labels) in dataset.iteritems():
-            if len(data.shape) > 2:
-                dataset[subset_name] = (data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
+        _transform_dataset(dataset,
+                           lambda data, labels: ((data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
+                                                 if len(data.shape) > 2 else (data, labels)))
     return dataset, label_to_index
 
 
