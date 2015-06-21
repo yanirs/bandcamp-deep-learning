@@ -25,10 +25,12 @@ class AbstractModelBuilder(object):
         self.momentum = momentum
         self.loss_function = loss_function
 
-    def build(self, **kwargs):
-        """Build the model, returning the output layer."""
-        l_in = InputLayer(shape=self.input_shape)
-        output_layer = DenseLayer(self._build_middle(l_in, **kwargs), num_units=self.output_dim, nonlinearity=softmax)
+    def build(self, output_layer=None, **kwargs):
+        """Build the model, returning the output layer and iteration functions."""
+        if not output_layer:
+            l_in = InputLayer(shape=self.input_shape)
+            output_layer = DenseLayer(self._build_middle(l_in, **kwargs), num_units=self.output_dim,
+                                      nonlinearity=softmax)
         training_iter = self._create_training_function(output_layer)
         validation_eval = self._create_eval_function('validation', output_layer)
         return output_layer, training_iter, validation_eval

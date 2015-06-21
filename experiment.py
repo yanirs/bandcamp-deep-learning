@@ -19,9 +19,9 @@ from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 
 @command
-def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=500, batch_size=100,
+def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
                    training_chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True,
-                   labels_to_keep=None):
+                   labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -40,6 +40,11 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * subtract_mean (bool) - if True, the mean RGB value in the training set will be subtracted from all subsets
                               of the dataset
      * labels_to_keep (str) - comma-separated list of labels to keep -- all other labels will be dropped
+     * snapshot_every (int) - if nonzero, a model snapshot will be save every snapshot_every number of epochs
+     * snapshot_prefix (str) - prefix for saved snapshot files
+     * start_from_snapshot (str) - path of model snapshot to start training from. Note: currently, the snapshot doesn't
+                                   contain all the original hyperparameters, so running this command with
+                                   start_from_snapshot still requires passing all the original command arguments
     """
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if not model_architecture in ARCHITECTURE_NAME_TO_CLASS:
@@ -51,9 +56,12 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
         dataset, output_dim=len(label_to_index), batch_size=batch_size, training_chunk_size=training_chunk_size,
         learning_rate=learning_rate
     )
-    output_layer, training_iter, validation_eval = model_builder.build(**_parse_model_params(model_params))
+    start_epoch, output_layer = _load_model_snapshot(start_from_snapshot) if start_from_snapshot else (0, None)
+    output_layer, training_iter, validation_eval = model_builder.build(output_layer=output_layer,
+                                                                       **_parse_model_params(model_params))
     _print_network_info(output_layer)
-    _run_training_loop(training_iter, validation_eval, num_epochs)
+    _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
+                       start_epoch)
 
 
 @command
@@ -74,6 +82,19 @@ def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=
         print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
     else:
         raise ValueError('Unknown baseline_name %s (supported values: random_forest, linear)' % baseline_name)
+
+
+def _save_model_snapshot(output_layer, snapshot_prefix, next_epoch):
+    snapshot_path = '%s.snapshot-%s.pkl.zip' % (snapshot_prefix, next_epoch)
+    print('Saving snapshot to %s' % snapshot_path)
+    with open(snapshot_path, 'wb') as out:
+        pkl_utils.dump((next_epoch, output_layer), out)
+
+
+def _load_model_snapshot(snapshot_path):
+    print('Loading pickled model from %s' % snapshot_path)
+    with open(snapshot_path, 'rb') as snapshot_file:
+        return pkl_utils.load(snapshot_file)
 
 
 def _transform_dataset(dataset, func):
@@ -151,21 +172,25 @@ def _print_network_info(output_layer):
     print('Sums: {:,} parameters {:.2f}MB'.format(sum_params, sum_memory))
 
 
-def _run_training_loop(training_iter, validation_eval, num_epochs):
+def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
+                       start_epoch):
     now = time()
     try:
         validation_loss, validation_accuracy = validation_eval()
         print('Initial validation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
 
-        for epoch in xrange(num_epochs):
+        for epoch in xrange(start_epoch, num_epochs):
             training_loss = training_iter()
             validation_loss, validation_accuracy = validation_eval()
-            print('Epoch %s of %s took %.3fs' % (epoch + 1, num_epochs, time() - now))
+            next_epoch = epoch + 1
+            print('Epoch %s of %s took %.3fs' % (next_epoch, num_epochs, time() - now))
             now = time()
             print('\ttraining loss:\t\t\t %.6f' % training_loss)
             print('\tvalidation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
             sys.stdout.flush()
 
+            if next_epoch % snapshot_every == 0:
+                _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
             if np.isnan(training_loss) or np.isnan(validation_loss) or np.isnan(validation_accuracy):
                 print('Divergence detected. Stopping now.')
                 break
