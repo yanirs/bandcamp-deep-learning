@@ -8,6 +8,7 @@ from types import FunctionType
 from commandr import command
 import lasagne
 import numpy as np
+from sklearn import utils as skutils
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
@@ -127,6 +128,7 @@ def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False
         _transform_dataset(dataset,
                            lambda data, labels: ((data.reshape((data.shape[0], np.prod(data.shape[1:]))), labels)
                                                  if len(data.shape) > 2 else (data, labels)))
+    _transform_dataset(dataset, skutils.shuffle)
     return dataset, label_to_index
 
 
