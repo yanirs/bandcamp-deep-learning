@@ -201,8 +201,7 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
 
             if snapshot_every and next_epoch % snapshot_every == 0:
                 _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
-            if np.isnan(training_loss) or np.isnan(validation_loss) or np.isnan(validation_accuracy):
-                print('Divergence detected. Stopping now.')
-                break
+    except OverflowError, e:
+        print('Divergence detected (OverflowError: %s). Stopping now.' % e)
     except KeyboardInterrupt:
         pass

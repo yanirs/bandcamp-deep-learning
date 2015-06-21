@@ -77,9 +77,13 @@ class AbstractModelBuilder(object):
                 instances_var.set_value(chunk_instances)
                 labels_var.set_value(chunk_labels)
                 for b in xrange(chunk_instances.shape[0] // self.batch_size):
-                    batch_results.append(theano_function(b))
+                    batch_result = theano_function(b)
+                    batch_results.append(batch_result)
                     if self.verbose and not b:
-                        print('...%s chunk %s batch %s results: %s' % (theano_function.name, c, b, batch_results[-1]))
+                        print('...%s chunk %s batch %s results: %s' % (theano_function.name, c, b, batch_result))
+                    if np.any(np.isnan(batch_result)):
+                        raise OverflowError('NaN batch result detected at chunk %s, batch %s of %s function' %
+                                            (c, b, theano_function.name))
             return np.mean(batch_results, axis=0)
 
         return run_theano_function
