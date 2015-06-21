@@ -58,7 +58,8 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     if model_architecture not in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
                                                                          sorted(ARCHITECTURE_NAME_TO_CLASS)))
-
+    # Set a static random seed for reproducibility
+    np.random.seed(572893204)
     dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean, labels_to_keep=labels_to_keep)
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size, verbose=verbose,
