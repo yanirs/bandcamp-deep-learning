@@ -21,8 +21,10 @@ from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
-                   training_chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True,
-                   labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None):
+                   chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True,
+                   labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None,
+                   num_crops=0, crop_shape=None, mirror_crops=True):
+    # pylint: disable=too-many-locals
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -32,9 +34,9 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
                             All keys are assumed to be strings, while values are evaluated as Python literals
      * num_epochs (int) - number of training epochs to run
      * batch_size (int) - number of examples to feed to the network in each batch
-     * training_chunk_size (int) - number of training examples to copy to the GPU in each chunk. If set to zero, all
-                                   examples will be copied. This is faster, but impossible when the size of the training
-                                   set is larger than the GPU's memory
+     * chunk_size (int) - number of examples to copy to the GPU in each chunk. If it's zero, the chunk size is set to
+                          the number of training examples, which results in faster training. However, it's impossible
+                          when the size of the example set is larger than the GPU's memory
      * reshape_to (str) - if given, the data will be reshaped to match this string, which should evaluate to a Python
                           tuple of ints (e.g., may be required to make the dataset fit into a convnet input layer)
      * learning_rate (float) - learning rate to use for training the network
@@ -46,6 +48,10 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * start_from_snapshot (str) - path of model snapshot to start training from. Note: currently, the snapshot doesn't
                                    contain all the original hyperparameters, so running this command with
                                    start_from_snapshot still requires passing all the original command arguments
+     * num_crops (int) - if non-zero, this number of random crops of the images will be used
+     * crop_shape (str) - if given, specifies the shape of the crops to be created (converted to tuple like reshape_to)
+     * mirror_crops (bool) - if True, every random crop will be mirrored horizontally, making the effective number of
+                             crops 2 * num_crops
     """
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if not model_architecture in ARCHITECTURE_NAME_TO_CLASS:
@@ -54,8 +60,9 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 
     dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean, labels_to_keep=labels_to_keep)
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
-        dataset, output_dim=len(label_to_index), batch_size=batch_size, training_chunk_size=training_chunk_size,
-        learning_rate=learning_rate
+        dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size,
+        learning_rate=learning_rate, num_crops=num_crops, crop_shape=literal_eval(crop_shape) if crop_shape else None,
+        mirror_crops=mirror_crops
     )
     start_epoch, output_layer = _load_model_snapshot(start_from_snapshot) if start_from_snapshot else (0, None)
     output_layer, training_iter, validation_eval = model_builder.build(output_layer=output_layer,
@@ -191,7 +198,7 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
             print('\tvalidation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
             sys.stdout.flush()
 
-            if next_epoch % snapshot_every == 0:
+            if snapshot_every and next_epoch % snapshot_every == 0:
                 _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
             if np.isnan(training_loss) or np.isnan(validation_loss) or np.isnan(validation_accuracy):
                 print('Divergence detected. Stopping now.')
