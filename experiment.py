@@ -21,7 +21,7 @@ from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
-                   chunk_size=0, reshape_to=None, learning_rate=0.01, subtract_mean=True,
+                   chunk_size=0, verbose=False, reshape_to=None, learning_rate=0.01, subtract_mean=True,
                    labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None,
                    num_crops=0, crop_shape=None, mirror_crops=True):
     # pylint: disable=too-many-locals
@@ -37,6 +37,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * chunk_size (int) - number of examples to copy to the GPU in each chunk. If it's zero, the chunk size is set to
                           the number of training examples, which results in faster training. However, it's impossible
                           when the size of the example set is larger than the GPU's memory
+     * verbose (bool) - if True, extra debugging information will be printed
      * reshape_to (str) - if given, the data will be reshaped to match this string, which should evaluate to a Python
                           tuple of ints (e.g., may be required to make the dataset fit into a convnet input layer)
      * learning_rate (float) - learning rate to use for training the network
@@ -54,13 +55,13 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
                              crops 2 * num_crops
     """
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
-    if not model_architecture in ARCHITECTURE_NAME_TO_CLASS:
+    if model_architecture not in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
                                                                          sorted(ARCHITECTURE_NAME_TO_CLASS)))
 
     dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean, labels_to_keep=labels_to_keep)
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
-        dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size,
+        dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size, verbose=verbose,
         learning_rate=learning_rate, num_crops=num_crops, crop_shape=literal_eval(crop_shape) if crop_shape else None,
         mirror_crops=mirror_crops
     )

@@ -13,7 +13,7 @@ import theano.tensor as T
 class AbstractModelBuilder(object):
     """Builder of Lasagne models and iteration functions, with architecture-specific implementation by subclasses."""
 
-    def __init__(self, dataset, output_dim, batch_size, chunk_size=0, learning_rate=0.01,
+    def __init__(self, dataset, output_dim, batch_size, chunk_size=0, verbose=False, learning_rate=0.01,
                  momentum=0.9, loss_function=categorical_crossentropy, num_crops=0, crop_shape=None, mirror_crops=True):
         if chunk_size and chunk_size < batch_size:
             raise ValueError('Chunk size must be greater than or equal to batch_size')
@@ -25,6 +25,7 @@ class AbstractModelBuilder(object):
         self.batch_size = batch_size
         # Note: this may result in the dataset being copied multiple times for small datasets
         self.chunk_size = chunk_size if chunk_size else self.dataset['training'][0].shape[0]
+        self.verbose = verbose
         self.learning_rate = learning_rate
         self.momentum = momentum
         self.loss_function = loss_function
@@ -77,6 +78,8 @@ class AbstractModelBuilder(object):
                 labels_var.set_value(chunk_labels)
                 for b in xrange(chunk_instances.shape[0] // self.batch_size):
                     batch_results.append(theano_function(b))
+                    if self.verbose and not b:
+                        print('...%s chunk %s batch %s results: %s' % (theano_function.name, c, b, batch_results[-1]))
             return np.mean(batch_results, axis=0)
 
         return run_theano_function
@@ -84,20 +87,11 @@ class AbstractModelBuilder(object):
     def _create_training_function(self, output_layer):
         """Return a function that runs one iteration of model updates on the training data and returns the training
         loss."""
-        instances_var = lasagne.utils.shared_empty(dim=len(self.input_shape))
-        labels_var = lasagne.utils.shared_empty(dim=1, dtype='int32')
-        theano_function = self._create_theano_training_function(instances_var, labels_var, output_layer)
-        return self._create_theano_function_runner(theano_function, instances_var, labels_var,
-                                                   *self.dataset['training'])
-
-    def _create_theano_training_function(self, instances_var, labels_var, output_layer):
-        """Return a theano.function that takes a batch index input, updates the network, and returns the training
-        loss."""
-        batch_index_var, batch_instances_var, batch_labels_var = self._create_batch_vars()
+        instances_var, labels_var, batch_index_var, batch_instances_var, batch_labels_var = self._create_data_vars()
         loss_eval_function = self._create_loss_eval_func(
             output_layer, batch_instances_var, batch_labels_var, deterministic=False
         )
-        return theano.function(
+        theano_function = theano.function(
             [batch_index_var],
             loss_eval_function,
             updates=lasagne.updates.nesterov_momentum(
@@ -107,22 +101,47 @@ class AbstractModelBuilder(object):
                 self.momentum
             ),
             givens=self._create_batch_givens(instances_var, labels_var, batch_index_var, batch_instances_var,
-                                             batch_labels_var)
+                                             batch_labels_var),
+            name='train'
         )
+        return self._create_theano_function_runner(theano_function, instances_var, labels_var,
+                                                   *self.dataset['training'])
 
     def _create_eval_function(self, subset_name, output_layer):
         """Return a function that returns the loss and accuracy of the given network on the given dataset's subset."""
-        instances_var = lasagne.utils.shared_empty(dim=len(self.input_shape))
-        labels_var = lasagne.utils.shared_empty(dim=1, dtype='int32')
-        theano_function = self._create_theano_eval_function(instances_var, labels_var, output_layer)
+        instances_var, labels_var, batch_index_var, batch_instances_var, batch_labels_var = self._create_data_vars()
+        theano_function = theano.function(
+            [batch_index_var],
+            [
+                self._create_loss_eval_func(output_layer, batch_instances_var, batch_labels_var, deterministic=True),
+                self._create_accuracy_func(output_layer, batch_instances_var, batch_labels_var)
+            ],
+            givens=self._create_batch_givens(instances_var, labels_var, batch_index_var, batch_instances_var,
+                                             batch_labels_var),
+            name='eval_%s' % subset_name
+        )
         return self._create_theano_function_runner(theano_function, instances_var, labels_var,
-                                                   *self.dataset['validation'])
+                                                   *self.dataset[subset_name])
 
-    def _create_theano_eval_function(self, instances_var, labels_var, output_layer):
-        """Return a theano.function that takes a batch index input, and returns a tuple of the loss and accuracy."""
-        batch_index_var, batch_instances_var, batch_labels_var = self._create_batch_vars()
+    def _create_data_vars(self):
+        batch_instances_var_type = T.TensorType(theano.config.floatX, [False] * len(self.input_shape))
+        return (lasagne.utils.shared_empty(dim=len(self.input_shape)),
+                lasagne.utils.shared_empty(dim=1, dtype='int32'),
+                T.iscalar('batch_index'),
+                batch_instances_var_type('x'),
+                T.ivector('y'))
+
+    def _create_batch_givens(self, instances_var, labels_var, batch_index_var, batch_instances_var, batch_labels_var):
+        batch_slice = slice(batch_index_var * self.batch_size, (batch_index_var + 1) * self.batch_size)
+        return {batch_instances_var: instances_var[batch_slice], batch_labels_var: labels_var[batch_slice]}
+
+    def _create_loss_eval_func(self, output_layer, batch_instances_var, batch_labels_var, deterministic):
+        return lasagne.objectives.Objective(output_layer, loss_function=self.loss_function).get_loss(
+            batch_instances_var, target=batch_labels_var, deterministic=deterministic
+        )
+
+    def _create_accuracy_func(self, output_layer, batch_instances_var, batch_labels_var):
         prob_output_var = lasagne.layers.get_output(output_layer, batch_instances_var, deterministic=True)
-
         if self.num_crops_with_mirrors:
             # Sum the probabilities for each instance's crops/mirrors and use that to make a prediction
             instances_per_batch = self.batch_size / self.num_crops_with_mirrors
@@ -136,28 +155,4 @@ class AbstractModelBuilder(object):
             sliced_batch_labels_var = batch_labels_var
 
         # TODO: accuracy may not be accurate in case of weirdly-sized chunks/batches
-        accuracy_eval_func = T.mean(T.eq(T.argmax(prob_output_var, axis=1),
-                                         sliced_batch_labels_var),
-                                    dtype=theano.config.floatX)
-        return theano.function(
-            [batch_index_var],
-            [
-                self._create_loss_eval_func(output_layer, batch_instances_var, batch_labels_var, deterministic=True),
-                accuracy_eval_func
-            ],
-            givens=self._create_batch_givens(instances_var, labels_var, batch_index_var, batch_instances_var,
-                                             batch_labels_var)
-        )
-
-    def _create_batch_vars(self):
-        batch_instances_var_type = T.TensorType(theano.config.floatX, [False] * len(self.input_shape))
-        return T.iscalar('batch_index'), batch_instances_var_type('x'), T.ivector('y')
-
-    def _create_batch_givens(self, instances_var, labels_var, batch_index_var, batch_instances_var, batch_labels_var):
-        batch_slice = slice(batch_index_var * self.batch_size, (batch_index_var + 1) * self.batch_size)
-        return {batch_instances_var: instances_var[batch_slice], batch_labels_var: labels_var[batch_slice]}
-
-    def _create_loss_eval_func(self, output_layer, batch_instances_var, batch_labels_var, deterministic):
-        return lasagne.objectives.Objective(output_layer, loss_function=self.loss_function).get_loss(
-            batch_instances_var, target=batch_labels_var, deterministic=deterministic
-        )
+        return T.mean(T.eq(T.argmax(prob_output_var, axis=1), sliced_batch_labels_var), dtype=theano.config.floatX)
