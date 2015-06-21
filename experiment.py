@@ -21,9 +21,9 @@ from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
-                   chunk_size=0, verbose=False, reshape_to=None, learning_rate=0.01, subtract_mean=True,
-                   labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None,
-                   num_crops=0, crop_shape=None, mirror_crops=True):
+                   chunk_size=0, verbose=False, reshape_to=None, update_func_name='nesterov_momentum',
+                   learning_rate=0.01, subtract_mean=True, labels_to_keep=None, snapshot_every=0,
+                   snapshot_prefix='model', start_from_snapshot=None, num_crops=0, crop_shape=None, mirror_crops=True):
     # pylint: disable=too-many-locals
     """Run a deep learning experiment, reporting results to standard output.
 
@@ -40,7 +40,9 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * verbose (bool) - if True, extra debugging information will be printed
      * reshape_to (str) - if given, the data will be reshaped to match this string, which should evaluate to a Python
                           tuple of ints (e.g., may be required to make the dataset fit into a convnet input layer)
-     * learning_rate (float) - learning rate to use for training the network
+     * update_func_name (str) - update function to use to train the network. See functions with signature
+                                lasagne.updates.<update_func_name>(loss_or_grads, params, learning_rate, **kwargs)
+     * learning_rate (float) - learning rate to use with the update function
      * subtract_mean (bool) - if True, the mean RGB value in the training set will be subtracted from all subsets
                               of the dataset
      * labels_to_keep (str) - comma-separated list of labels to keep -- all other labels will be dropped
@@ -63,8 +65,8 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean, labels_to_keep=labels_to_keep)
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size, verbose=verbose,
-        learning_rate=learning_rate, num_crops=num_crops, crop_shape=literal_eval(crop_shape) if crop_shape else None,
-        mirror_crops=mirror_crops
+        update_func_name=update_func_name, learning_rate=learning_rate, num_crops=num_crops,
+        crop_shape=literal_eval(crop_shape) if crop_shape else None, mirror_crops=mirror_crops
     )
     start_epoch, output_layer = _load_model_snapshot(start_from_snapshot) if start_from_snapshot else (0, None)
     output_layer, training_iter, validation_eval = model_builder.build(output_layer=output_layer,

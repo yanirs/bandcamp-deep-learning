@@ -13,8 +13,9 @@ import theano.tensor as T
 class AbstractModelBuilder(object):
     """Builder of Lasagne models and iteration functions, with architecture-specific implementation by subclasses."""
 
-    def __init__(self, dataset, output_dim, batch_size, chunk_size=0, verbose=False, learning_rate=0.01,
-                 momentum=0.9, loss_function=categorical_crossentropy, num_crops=0, crop_shape=None, mirror_crops=True):
+    def __init__(self, dataset, output_dim, batch_size, chunk_size=0, verbose=False,
+                 update_func_name='nesterov_momentum', learning_rate=0.01, update_func_kwargs=(),
+                 loss_function=categorical_crossentropy, num_crops=0, crop_shape=None, mirror_crops=True):
         if chunk_size and chunk_size < batch_size:
             raise ValueError('Chunk size must be greater than or equal to batch_size')
         self.num_crops_with_mirrors = num_crops * 2 if mirror_crops else num_crops
@@ -26,8 +27,9 @@ class AbstractModelBuilder(object):
         # Note: this may result in the dataset being copied multiple times for small datasets
         self.chunk_size = chunk_size if chunk_size else self.dataset['training'][0].shape[0]
         self.verbose = verbose
+        self.update_func_name = update_func_name
         self.learning_rate = learning_rate
-        self.momentum = momentum
+        self.update_func_kwargs = dict(update_func_kwargs)
         self.loss_function = loss_function
         self.num_crops = num_crops
         self.crop_shape = crop_shape
@@ -98,12 +100,10 @@ class AbstractModelBuilder(object):
         theano_function = theano.function(
             [batch_index_var],
             loss_eval_function,
-            updates=lasagne.updates.nesterov_momentum(
-                loss_eval_function,
-                lasagne.layers.get_all_params(output_layer),
-                self.learning_rate,
-                self.momentum
-            ),
+            updates=getattr(lasagne.updates, self.update_func_name)(loss_eval_function,
+                                                                    lasagne.layers.get_all_params(output_layer),
+                                                                    self.learning_rate,
+                                                                    **self.update_func_kwargs),
             givens=self._create_batch_givens(instances_var, labels_var, batch_index_var, batch_instances_var,
                                              batch_labels_var),
             name='train'
