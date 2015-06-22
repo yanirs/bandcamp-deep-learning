@@ -86,8 +86,9 @@ class LasagneMnistConvExample(ConvNet):
 
 class VggNet(ConvNet):
     """Network D by VGGNet, from Very deep convolutional networks for large scale image recognition
-    (Simonyan and Zisserman, 2014). Includes an optional reduction factor to reduce the number of filters and hidden
-    units.
+    (Simonyan and Zisserman, 2014).
+
+    Includes an optional reduction factor to reduce the number of filters and hidden units.
     """
     def _build_middle(self, l_in, reduction_factor=1, **_):
         kwargs = dict(
@@ -112,6 +113,29 @@ class VggNet(ConvNet):
             if key.endswith('num_filters') or key.endswith('num_units'):
                 kwargs[key] = value / reduction_factor
         return super(VggNet, self)._build_middle(l_in, **kwargs)
+
+
+class AlexNet(ConvNet):
+    """AlexNet, from ImageNet classification with deep convolutional neural networks (Krizhevsky et al., 2012).
+
+    The parameters of the network can be overriden by passing in different keyword argument values.
+    """
+    def _build_middle(self, l_in, **kwargs):
+        net_kwargs = dict(
+            num_conv_layers=5, num_dense_layers=2,
+            lc0_num_filters=48, lc0_filter_size=11, lc0_stride=4,
+            lc0_mp=True, lm0_pool_size=3, lm0_stride=2,
+            lc1_num_filters=128, lc1_filter_size=5,
+            lc1_mp=True, lm1_pool_size=3, lm1_stride=2,
+            lc2_num_filters=192, lc2_filter_size=3,
+            lc3_num_filters=192, lc3_filter_size=3,
+            lc4_num_filters=128, lc4_filter_size=3,
+            lc4_mp=True, lm4_pool_size=3, lm4_stride=2,
+            ld0_num_units=2048,
+            ld1_num_units=2048
+        )
+        net_kwargs.update(kwargs)
+        return super(AlexNet, self)._build_middle(l_in, **net_kwargs)
 
 
 def _build_dense_plus_dropout(incoming_layer, num_units):
