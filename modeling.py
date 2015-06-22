@@ -39,8 +39,9 @@ class AbstractModelBuilder(object):
         else:
             self.input_shape = (self.batch_size, ) + tuple(dataset['training'][0].shape[1:])
 
-        if (self.chunk_size * (self.num_crops_with_mirrors or 1)) % self.batch_size != 0:
-            warn('Effective chunk size is not divisible by batch_size')
+        effective_chunk_size = self.chunk_size * (self.num_crops_with_mirrors or 1)
+        if effective_chunk_size % self.batch_size != 0:
+            warn('Effective chunk size %s is not divisible by batch_size %s' % (effective_chunk_size, self.batch_size))
 
     def build(self, output_layer=None, **kwargs):
         """Build the model, returning the output layer and iteration functions."""

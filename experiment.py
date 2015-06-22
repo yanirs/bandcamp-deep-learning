@@ -122,13 +122,15 @@ def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False
         unknown_labels = labels_to_keep.difference(label_to_index)
         if unknown_labels:
             raise ValueError('Unknown labels passed %s' % unknown_labels)
-        label_to_index = {l: i for l, i in label_to_index.iteritems() if l in labels_to_keep}
-        label_indexes_to_keep = label_to_index.values()
+        old_label_index_to_new = dict(zip((label_to_index[l] for l in labels_to_keep), xrange(len(labels_to_keep))))
+        old_label_indexes_to_keep = [label_to_index[l] for l in labels_to_keep]
+        map_labels = np.vectorize(lambda li: old_label_index_to_new[li], otypes=['int32'])
 
         def drop_labels(data, labels):
-            ind = np.in1d(labels, label_indexes_to_keep)
-            return data[ind], labels[ind]
+            ind = np.in1d(labels, old_label_indexes_to_keep)
+            return data[ind], map_labels(labels[ind])
         _transform_dataset(dataset, drop_labels)
+        label_to_index = {l: old_label_index_to_new[label_to_index[l]] for l in labels_to_keep}
     if reshape_to:
         reshape_to = literal_eval(reshape_to)
         _transform_dataset(dataset, lambda data, labels: (data.reshape((data.shape[0], ) + reshape_to), labels))
