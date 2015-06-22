@@ -171,7 +171,7 @@ def download_mnist(data_dir):
     with GzipFile(fileobj=StringIO(response.content), mode='rb') as unzipped:
         raw_data = cPickle.load(unzipped)
     dataset = {name: (d[0], d[1].astype('int32')) for name, d in zip(['training', 'validation', 'testing'], raw_data)}
-    label_to_index = dict(zip(range(10), range(10)))
+    label_to_index = dict(zip(map(str, range(10)), range(10)))
     with open(os.path.join(data_dir, 'mnist.pkl.zip'), 'wb') as out:
         pkl_utils.dump((dataset, label_to_index), out)
 
