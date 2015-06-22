@@ -150,7 +150,7 @@ def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False
         reshape_to = literal_eval(reshape_to)
         _transform_dataset(dataset, lambda data, labels: (data.reshape((data.shape[0], ) + reshape_to), labels))
     if subtract_mean:
-        training_mean = np.mean(dataset['training'][0], dtype='float32')
+        training_mean = np.mean(dataset['training'][0], axis=0, dtype='float32')
         _transform_dataset(dataset, lambda data, labels: (data - training_mean, labels))
     if flatten:
         _transform_dataset(dataset,
