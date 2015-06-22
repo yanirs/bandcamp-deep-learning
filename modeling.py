@@ -1,5 +1,6 @@
-from math import ceil
+from math import ceil, sqrt
 from warnings import warn
+import itertools
 
 import lasagne
 from lasagne.layers import InputLayer, DenseLayer
@@ -16,8 +17,6 @@ class AbstractModelBuilder(object):
     def __init__(self, dataset, output_dim, batch_size, chunk_size=0, verbose=False,
                  update_func_name='nesterov_momentum', learning_rate=0.01, update_func_kwargs=(),
                  loss_function=categorical_crossentropy, num_crops=0, crop_shape=None, mirror_crops=True):
-        if chunk_size and chunk_size < batch_size:
-            raise ValueError('Chunk size must be greater than or equal to batch_size')
         self.num_crops_with_mirrors = num_crops * 2 if mirror_crops else num_crops
         if self.num_crops_with_mirrors and batch_size % self.num_crops_with_mirrors != 0:
             raise ValueError('batch_size must be divisible by num_crops_with_mirrors')
@@ -25,7 +24,7 @@ class AbstractModelBuilder(object):
         self.output_dim = output_dim
         self.batch_size = batch_size
         # Note: this may result in the dataset being copied multiple times for small datasets
-        self.chunk_size = chunk_size if chunk_size else self.dataset['training'][0].shape[0]
+        self.chunk_size = chunk_size or self.dataset['training'][0].shape[0]
         self.verbose = verbose
         self.update_func_name = update_func_name
         self.learning_rate = learning_rate
@@ -40,6 +39,9 @@ class AbstractModelBuilder(object):
             self.input_shape = (self.batch_size, ) + tuple(dataset['training'][0].shape[1:])
 
         effective_chunk_size = self.chunk_size * (self.num_crops_with_mirrors or 1)
+        if effective_chunk_size < batch_size:
+            raise ValueError('Effective chunk size %s must be greater than or equal to batch_size %s' %
+                             (effective_chunk_size, self.batch_size))
         if effective_chunk_size % self.batch_size != 0:
             warn('Effective chunk size %s is not divisible by batch_size %s' % (effective_chunk_size, self.batch_size))
 
@@ -56,27 +58,43 @@ class AbstractModelBuilder(object):
     def _build_middle(self, l_in, **kwargs):
         raise NotImplementedError
 
-    def _transform_chunk(self, chunk_instances, chunk_labels):
+    def _generate_crop_positions(self, instance_shape, deterministic):
+        if deterministic:
+            max_crop_start = [instance_shape[i + 1] - self.crop_shape[i] for i in (0, 1)]
+            # Start with centre crop
+            yield (max_crop_start[i] / 2 for i in (0, 1))
+            # Generate as many evenly-distributed crops as we can (the centre crop may show up again)
+            linspace_size = int(ceil(sqrt(self.num_crops - 1)))
+            positions = itertools.product(*(np.linspace(0, max_crop_start[i], linspace_size, dtype='int32')
+                                            for i in (0, 1)))
+            for _ in xrange(self.num_crops - 1):
+                yield positions.next()
+        else:
+            for _ in xrange(self.num_crops):
+                yield (np.random.randint(0, instance_shape[i + 1] - self.crop_shape[i]) for i in (0, 1))
+
+    def _transform_chunk(self, chunk_instances, chunk_labels, deterministic):
         if not self.num_crops:
             return chunk_instances, chunk_labels
         transformed_instances = []
         for instance in chunk_instances:
-            for _ in xrange(self.num_crops):
-                start_x, start_y = (np.random.randint(0, instance.shape[i + 1] - self.crop_shape[i]) for i in (0, 1))
-                crop = instance[:, start_x:(start_x + self.crop_shape[0]), start_y:(start_y + self.crop_shape[1])]
-                transformed_instances.append(crop)
+            for start_x, start_y in self._generate_crop_positions(instance.shape, deterministic):
+                cropped = instance[:, start_x:(start_x + self.crop_shape[0]), start_y:(start_y + self.crop_shape[1])]
+                transformed_instances.append(cropped)
                 if self.mirror_crops:
-                    transformed_instances.append(crop[:, :, ::-1])
+                    transformed_instances.append(cropped[:, :, ::-1])
         return np.array(transformed_instances), chunk_labels.repeat(self.num_crops_with_mirrors)
 
-    def _create_theano_function_runner(self, theano_function, instances_var, labels_var, instances, labels):
+    def _create_theano_function_runner(self, theano_function, instances_var, labels_var, instances, labels,
+                                       deterministic):
         num_chunks = int(ceil(instances.shape[0] / float(self.chunk_size)))
 
         def run_theano_function():
             batch_results = []
             for c in xrange(num_chunks):
                 chunk_slice = slice(c * self.chunk_size, (c + 1) * self.chunk_size)
-                chunk_instances, chunk_labels = self._transform_chunk(instances[chunk_slice], labels[chunk_slice])
+                chunk_instances, chunk_labels = self._transform_chunk(instances[chunk_slice], labels[chunk_slice],
+                                                                      deterministic)
                 instances_var.set_value(chunk_instances)
                 labels_var.set_value(chunk_labels)
                 for b in xrange(chunk_instances.shape[0] // self.batch_size):
@@ -110,7 +128,7 @@ class AbstractModelBuilder(object):
             name='train'
         )
         return self._create_theano_function_runner(theano_function, instances_var, labels_var,
-                                                   *self.dataset['training'])
+                                                   *self.dataset['training'], deterministic=False)
 
     def _create_eval_function(self, subset_name, output_layer):
         """Return a function that returns the loss and accuracy of the given network on the given dataset's subset."""
@@ -126,7 +144,7 @@ class AbstractModelBuilder(object):
             name='eval_%s' % subset_name
         )
         return self._create_theano_function_runner(theano_function, instances_var, labels_var,
-                                                   *self.dataset[subset_name])
+                                                   *self.dataset[subset_name], deterministic=True)
 
     def _create_data_vars(self):
         batch_instances_var_type = T.TensorType(theano.config.floatX, [False] * len(self.input_shape))
