@@ -19,12 +19,16 @@ from theano_latest.misc import pkl_utils
 from architectures import ARCHITECTURE_NAME_TO_CLASS
 
 
+_MIN_LEARNING_RATE = 1e-10
+_LEARNING_RATE_GRACE_PERIOD = 3
+
+
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
                    chunk_size=0, verbose=False, reshape_to=None, update_func_name='nesterov_momentum',
-                   learning_rate=0.01, subtract_mean=True, labels_to_keep=None, snapshot_every=0,
-                   snapshot_prefix='model', start_from_snapshot=None, num_crops=0, crop_shape=None, mirror_crops=True):
-    # pylint: disable=too-many-locals
+                   learning_rate=0.01, adapt_learning_rate=False, subtract_mean=True, labels_to_keep=None,
+                   snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None, num_crops=0, crop_shape=None,
+                   mirror_crops=True):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -43,6 +47,9 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * update_func_name (str) - update function to use to train the network. See functions with signature
                                 lasagne.updates.<update_func_name>(loss_or_grads, params, learning_rate, **kwargs)
      * learning_rate (float) - learning rate to use with the update function
+     * adapt_learning_rate (bool) - if True, the learning rate will be reduced by a factor of 10 when the validation
+                                    loss hasn't decreased within _LEARNING_RATE_GRACE_PERIOD, down to a minimum of
+                                    _MIN_LEARNING_RATE
      * subtract_mean (bool) - if True, the mean RGB value in the training set will be subtracted from all subsets
                               of the dataset
      * labels_to_keep (str) - comma-separated list of labels to keep -- all other labels will be dropped
@@ -56,6 +63,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * mirror_crops (bool) - if True, every random crop will be mirrored horizontally, making the effective number of
                              crops 2 * num_crops
     """
+    # pylint: disable=too-many-locals
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if model_architecture not in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
@@ -63,17 +71,24 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     # Set a static random seed for reproducibility
     np.random.seed(572893204)
     dataset, label_to_index = _load_data(dataset_path, reshape_to, subtract_mean, labels_to_keep=labels_to_keep)
+    learning_rate_var = theano.shared(lasagne.utils.floatX(learning_rate))
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size, verbose=verbose,
-        update_func_name=update_func_name, learning_rate=learning_rate, num_crops=num_crops,
+        update_func_name=update_func_name, learning_rate=learning_rate_var, num_crops=num_crops,
         crop_shape=literal_eval(crop_shape) if crop_shape else None, mirror_crops=mirror_crops
     )
     start_epoch, output_layer = _load_model_snapshot(start_from_snapshot) if start_from_snapshot else (0, None)
     output_layer, training_iter, validation_eval = model_builder.build(output_layer=output_layer,
                                                                        **_parse_model_params(model_params))
     _print_network_info(output_layer)
-    _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
-                       start_epoch)
+
+    try:
+        _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
+                           start_epoch, learning_rate_var, adapt_learning_rate)
+    except OverflowError, e:
+        print('Divergence detected (OverflowError: %s). Stopping now.' % e)
+    except KeyboardInterrupt:
+        pass
 
 
 @command
@@ -188,25 +203,35 @@ def _print_network_info(output_layer):
 
 
 def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
-                       start_epoch):
+                       start_epoch, learning_rate_var, adapt_learning_rate):
     now = time()
-    try:
+    validation_loss, validation_accuracy = validation_eval()
+    print('Initial validation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
+
+    min_validation_loss = None
+    grace_period_epoch = None
+    for epoch in xrange(start_epoch, num_epochs):
+        training_loss = training_iter()
         validation_loss, validation_accuracy = validation_eval()
-        print('Initial validation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
+        next_epoch = epoch + 1
+        print('Epoch %s of %s took %.3fs' % (next_epoch, num_epochs, time() - now))
+        now = time()
+        print('\ttraining loss:\t\t\t %.6f' % training_loss)
+        print('\tvalidation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
+        sys.stdout.flush()
 
-        for epoch in xrange(start_epoch, num_epochs):
-            training_loss = training_iter()
-            validation_loss, validation_accuracy = validation_eval()
-            next_epoch = epoch + 1
-            print('Epoch %s of %s took %.3fs' % (next_epoch, num_epochs, time() - now))
-            now = time()
-            print('\ttraining loss:\t\t\t %.6f' % training_loss)
-            print('\tvalidation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
-            sys.stdout.flush()
+        if snapshot_every and next_epoch % snapshot_every == 0:
+            _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
 
-            if snapshot_every and next_epoch % snapshot_every == 0:
-                _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
-    except OverflowError, e:
-        print('Divergence detected (OverflowError: %s). Stopping now.' % e)
-    except KeyboardInterrupt:
-        pass
+        if min_validation_loss is None or validation_loss < min_validation_loss:
+            min_validation_loss = validation_loss
+            grace_period_epoch = epoch
+        if adapt_learning_rate and validation_loss > min_validation_loss and \
+                epoch - grace_period_epoch > _LEARNING_RATE_GRACE_PERIOD:
+            new_learning_rate = learning_rate_var.get_value() / lasagne.utils.floatX(10)
+            if new_learning_rate < _MIN_LEARNING_RATE:
+                print('Reached minimum learning rate. Stopping now.')
+                break
+            learning_rate_var.set_value(new_learning_rate)
+            grace_period_epoch = epoch
+            print('Validation loss increased from minimum, decreasing learning rate to %.0e' % new_learning_rate)
