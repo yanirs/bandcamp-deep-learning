@@ -239,3 +239,7 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
                 lasagne.layers.set_all_param_values(output_layer, min_state.params)
                 min_state = _MinState(min_state.loss, epoch, min_state.params)
                 print('Validation loss increased from minimum, decreasing learning rate to %.0e' % new_learning_rate)
+
+    # Save the final model if training finished
+    print('Training finished -- saving final model')
+    _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
