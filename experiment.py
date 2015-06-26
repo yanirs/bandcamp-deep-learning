@@ -31,9 +31,9 @@ _LEARNING_RATE_GRACE_PERIOD = 3
 @command
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
                    chunk_size=0, verbose=False, reshape_to=None, update_func_name='nesterov_momentum',
-                   learning_rate=0.01, adapt_learning_rate=False, subtract_mean=True, labels_to_keep=None,
-                   snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None, snapshot_final_model=True,
-                   num_crops=0, crop_shape=None, mirror_crops=True):
+                   learning_rate=0.01, update_func_kwargs=None, adapt_learning_rate=False, subtract_mean=True,
+                   labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None,
+                   snapshot_final_model=True, num_crops=0, crop_shape=None, mirror_crops=True):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -52,6 +52,8 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * update_func_name (str) - update function to use to train the network. See functions with signature
                                 lasagne.updates.<update_func_name>(loss_or_grads, params, learning_rate, **kwargs)
      * learning_rate (float) - learning rate to use with the update function
+     * update_func_kwargs (str) - keyword arguments to pass to the update function in addition to learning_rate. This
+                                  string has the same format as model_params
      * adapt_learning_rate (bool) - if True, the learning rate will be reduced by a factor of 10 when the validation
                                     loss hasn't decreased within _LEARNING_RATE_GRACE_PERIOD, down to a minimum of
                                     _MIN_LEARNING_RATE
@@ -69,7 +71,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * mirror_crops (bool) - if True, every random crop will be mirrored horizontally, making the effective number of
                              crops 2 * num_crops
     """
-    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals,too-many-arguments
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
     if model_architecture not in ARCHITECTURE_NAME_TO_CLASS:
         raise ValueError('Unknown architecture %s (valid values: %s)' % (model_architecture,
@@ -80,12 +82,14 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     learning_rate_var = theano.shared(lasagne.utils.floatX(learning_rate))
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size, verbose=verbose,
-        update_func_name=update_func_name, learning_rate=learning_rate_var, num_crops=num_crops,
+        update_func_name=update_func_name, learning_rate=learning_rate_var,
+        update_func_kwargs=_parse_param_str(update_func_kwargs), num_crops=num_crops,
         crop_shape=literal_eval(crop_shape) if crop_shape else None, mirror_crops=mirror_crops
     )
     start_epoch, output_layer = _load_model_snapshot(start_from_snapshot) if start_from_snapshot else (0, None)
-    output_layer, training_iter, validation_eval = model_builder.build(output_layer=output_layer,
-                                                                       **_parse_model_params(model_params))
+    output_layer, training_iter, validation_eval = model_builder.build(
+        output_layer=output_layer, **_parse_param_str(model_params)
+    )
     _print_network_info(output_layer)
 
     try:
@@ -123,18 +127,21 @@ def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_s
     # TODO: docstring
 
     def join_command_line_args(param_dict):
-        pairs = []
+        dict_to_param_str = lambda d: ':'.join('%s=%s' % (k, v) for k, v in sorted(d.iteritems()))
+        args = []
         for param_name, param_value in sorted(param_dict.iteritems()):
             if param_name == 'mirror_crops':
                 if not param_value:
-                    pairs.append('--no-mirror-crops')
+                    args.append('--no-mirror-crops')
             elif param_name == 'model_params':
                 if param_value:
-                    pairs.append('--model-params')
-                    pairs.append(':'.join('%s=%s' % (k, v) for k, v in param_value.iteritems()))
+                    args.append('--model-params %s' % dict_to_param_str(param_value))
+            elif param_name == 'update_func':
+                args.append('--update-func-name %s' % param_value.pop('name'))
+                args.append('--update-func-kwargs %s' % dict_to_param_str(param_value))
             else:
-                pairs.append('--%s %s' % (param_name, param_value))
-        return ' '.join(pairs)
+                args.append('--%s %s' % (param_name, param_value))
+        return ' '.join(args)
 
     def objective(param_dict):
         # TODO: fix possible collisions
@@ -169,22 +176,23 @@ def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_s
         os.makedirs(log_dir)
 
     learning_rate_range = literal_eval(learning_rate_range) if learning_rate_range else (-12, -5)
-    model_params = _parse_model_params(base_model_params) if base_model_params else {}
-    parsed_model_param_space = _parse_model_params(model_params_space) if model_params_space else {}
-    for param_name_and_hp_func, hp_func_args in parsed_model_param_space.iteritems():
+    model_params = _parse_param_str(base_model_params)
+    for param_name_and_hp_func, hp_func_args in _parse_param_str(model_params_space).iteritems():
         param_name, hp_func_name = param_name_and_hp_func.split('__')
         model_params[param_name] = getattr(hyperopt.hp, hp_func_name)(param_name, *hp_func_args)
     space = dict(
-        update_func_name=hyperopt.hp.choice('update_func_name', ['adam', 'nesterov_momentum']),
+        update_func=hyperopt.hp.choice('update_func', [
+            dict(name='adam',
+                 beta1=hyperopt.hp.uniform('beta1', 0.0, 0.9),
+                 beta2=hyperopt.hp.uniform('beta2', 0.99, 1.0)),
+            dict(name='nesterov_momentum',
+                 momentum=hyperopt.hp.uniform('momentum', 0.5, 1.0))
+        ]),
         learning_rate=hyperopt.hp.loguniform('learning_rate', *learning_rate_range),
         mirror_crops=hyperopt.hp.choice('mirror_crops', [False, True]),
         num_crops=hyperopt.hp.choice('num_crops', [1, 5]),
         model_params=model_params
     )
-
-    # TODO:
-    # - nesterov momentum: in [0.5, 0.99]
-    # - adam parameters -- which ones are important?
 
     trials = hyperopt.Trials()
     hyperopt.fmin(objective, space=space, algo=hyperopt.tpe.suggest, trials=trials, max_evals=max_evals)
@@ -240,16 +248,15 @@ def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False
     return dataset, label_to_index
 
 
-def _parse_model_params(model_params):
+def _parse_param_str(param_str):
     param_kwargs = {}
-    if model_params:
-        for pair in model_params.split(':'):
+    if param_str:
+        for pair in param_str.split(':'):
             key, value = pair.split('=')
             try:
                 param_kwargs[key] = literal_eval(value)
             except (SyntaxError, ValueError):
                 param_kwargs[key] = value
-        print('Parsed model params: {}'.format(sorted(param_kwargs.iteritems())))
     return param_kwargs
 
 
