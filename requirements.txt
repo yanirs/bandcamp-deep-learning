@@ -10,6 +10,7 @@ certifi==2015.04.28
 commandr==1.3.2
 decorator==3.4.2
 ecdsa==0.13
+hyperopt==0.0.2
 ipython==3.1.0
 jsonschema==2.4.0
 matplotlib==1.4.3
@@ -21,6 +22,7 @@ numpy==1.9.2
 paramiko==1.15.2
 ptyprocess==0.5
 pycrypto==2.6.1
+pymongo==3.0.2
 pyparsing==2.0.3
 python-dateutil==2.4.2
 pytz==2015.4

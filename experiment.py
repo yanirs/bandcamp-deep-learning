@@ -1,12 +1,15 @@
 from ast import literal_eval
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import inspect
+import os
 from random import Random
 from time import time
 import sys
 from types import FunctionType
+from warnings import warn
 
 from commandr import command
+import hyperopt
 import lasagne
 import numpy as np
 from sklearn import utils as skutils
@@ -14,6 +17,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import LinearSVC
+import subprocess
 import theano
 from theano_latest.misc import pkl_utils
 
@@ -28,8 +32,8 @@ _LEARNING_RATE_GRACE_PERIOD = 3
 def run_experiment(dataset_path, model_architecture, model_params=None, num_epochs=5000, batch_size=100,
                    chunk_size=0, verbose=False, reshape_to=None, update_func_name='nesterov_momentum',
                    learning_rate=0.01, adapt_learning_rate=False, subtract_mean=True, labels_to_keep=None,
-                   snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None, num_crops=0, crop_shape=None,
-                   mirror_crops=True):
+                   snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None, snapshot_final_model=True,
+                   num_crops=0, crop_shape=None, mirror_crops=True):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -59,6 +63,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * start_from_snapshot (str) - path of model snapshot to start training from. Note: currently, the snapshot doesn't
                                    contain all the original hyperparameters, so running this command with
                                    start_from_snapshot still requires passing all the original command arguments
+     * snapshot_final_model (bool) - if True, the final model snapshot will be saved
      * num_crops (int) - if non-zero, this number of random crops of the images will be used
      * crop_shape (str) - if given, specifies the shape of the crops to be created (converted to tuple like reshape_to)
      * mirror_crops (bool) - if True, every random crop will be mirrored horizontally, making the effective number of
@@ -85,7 +90,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 
     try:
         _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
-                           start_epoch, learning_rate_var, adapt_learning_rate)
+                           snapshot_final_model, start_epoch, learning_rate_var, adapt_learning_rate)
     except OverflowError, e:
         print('Divergence detected (OverflowError: %s). Stopping now.' % e)
     except KeyboardInterrupt:
@@ -110,6 +115,70 @@ def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=
         print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
     else:
         raise ValueError('Unknown baseline_name %s (supported values: random_forest, linear)' % baseline_name)
+
+
+@command
+def search_hyperparams(base_cmd, log_dir, max_evals=10, learning_rate_range=None):
+    # TODO: docstring
+
+    def join_command_line_args(values):
+        pairs = []
+        for k, v in zip(label_to_generating_func, values):
+            if k == 'mirror_crops':
+                if not v:
+                    pairs.append('--no-mirror-crops')
+            else:
+                pairs.append('--%s %s' % (k, v))
+        return ' '.join(pairs)
+
+    def objective(values):
+        # TODO: fix possible collisions
+        log_filename = os.path.join(log_dir, 'experiment.%s.log' % hash(values))
+        cmd = '%s %s 2>&1 | tee %s' % (base_cmd, join_command_line_args(values), log_filename)
+        print
+        try:
+            if os.path.exists(log_filename):
+                print('Loading results of %s' % cmd)
+                with open(log_filename, 'rb') as log_file:
+                    output = log_file.read()
+            else:
+                print('Running %s' % cmd)
+                output = subprocess.check_output(cmd, shell=True)
+
+            if 'OverflowError' in output or 'MemoryError' in output:
+                error_rate = np.inf
+            else:
+                error_rate = 100 - float(output.strip().split()[-1].strip('%'))
+        except Exception:
+            os.unlink(log_filename)
+            raise
+        print('\tError rate: %.2f%%' % error_rate)
+        return dict(loss=error_rate, status=hyperopt.STATUS_OK, cmd=cmd)
+
+    if os.path.exists(log_dir):
+        warn('Log directory %s exists. Existing log files may be read to avoid repeating experiments.' % log_dir)
+    else:
+        os.makedirs(log_dir)
+
+    learning_rate_range = literal_eval(learning_rate_range) if learning_rate_range else (-7, -2)
+    label_to_generating_func = OrderedDict((
+        ('update_func_name', hyperopt.hp.choice('update_func_name', ['adam', 'nesterov_momentum'])),
+        ('learning_rate', hyperopt.hp.loguniform('learning_rate', *learning_rate_range)),
+        ('mirror_crops', hyperopt.hp.choice('mirror_crops', [False, True])),
+        ('num_crops', hyperopt.hp.choice('num_crops', [1, 5, 10]))
+    ))
+
+    # TODO:
+    # - nesterov momentum: in [0.5, 0.99]
+    # - adam parameters -- which ones are important?
+    # - dropout: 0.0 to 0.75 (with architectures?)
+    # - architecture parameters as a nested space (how to unpack?)
+
+    trials = hyperopt.Trials()
+    hyperopt.fmin(objective, space=label_to_generating_func.values(), algo=hyperopt.tpe.suggest, trials=trials,
+                  max_evals=max_evals)
+
+    print('---\nBest command line: %(cmd)s\nError rate: %(loss).2f%%' % trials.best_trial['result'])
 
 
 def _save_model_snapshot(output_layer, snapshot_prefix, next_epoch):
@@ -207,10 +276,11 @@ _MinState = namedtuple('MinState', ('loss', 'epoch', 'params'))
 
 
 def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
-                       start_epoch, learning_rate_var, adapt_learning_rate):
+                       snapshot_final_model, start_epoch, learning_rate_var, adapt_learning_rate):
     now = time()
     validation_loss, validation_accuracy = validation_eval()
     print('Initial validation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
+    sys.stdout.flush()
 
     min_state = None
     for epoch in xrange(start_epoch, num_epochs):
@@ -240,6 +310,6 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
                 min_state = _MinState(min_state.loss, epoch, min_state.params)
                 print('Validation loss increased from minimum, decreasing learning rate to %.0e' % new_learning_rate)
 
-    # Save the final model if training finished
-    print('Training finished -- saving final model')
-    _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
+    if snapshot_final_model:
+        print('Training finished -- saving final model')
+        _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
