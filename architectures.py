@@ -56,10 +56,10 @@ class ConvNet(AbstractModelBuilder):
 
         for i in xrange(num_dense_layers):
             dense_kwargs = self._extract_layer_kwargs('d', i, kwargs)
-            has_dropout = dense_kwargs.pop('hd', True)
+            dropout = dense_kwargs.pop('dropout', 0.5)
             l_bottom = DenseLayer(l_bottom, W=HeUniform(gain='relu'), **dense_kwargs)
-            if has_dropout:
-                l_bottom = DropoutLayer(l_bottom, p=0.5)
+            if dropout:
+                l_bottom = DropoutLayer(l_bottom, p=dropout)
 
         return l_bottom
 
