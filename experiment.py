@@ -282,7 +282,7 @@ def _print_network_info(output_layer):
     print('Sums: {:,} parameters {:.2f}MB'.format(sum_params, sum_memory))
 
 
-_MinState = namedtuple('MinState', ('loss', 'epoch', 'params'))
+_MaxState = namedtuple('MaxState', ('accuracy', 'epoch', 'params'))
 
 
 def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
@@ -292,7 +292,7 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
     print('Initial validation loss & accuracy:\t %.6f\t%.2f%%' % (validation_loss, validation_accuracy * 100))
     sys.stdout.flush()
 
-    min_state = None
+    max_state = None
     for epoch in xrange(start_epoch, num_epochs):
         training_loss = training_iter()
         validation_loss, validation_accuracy = validation_eval()
@@ -307,18 +307,18 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
             _save_model_snapshot(output_layer, snapshot_prefix, next_epoch)
 
         if adapt_learning_rate:
-            if min_state is None or validation_loss < min_state.loss:
-                min_state = _MinState(validation_loss, epoch, lasagne.layers.get_all_param_values(output_layer))
+            if max_state is None or validation_accuracy > max_state.accuracy:
+                max_state = _MaxState(validation_accuracy, epoch, lasagne.layers.get_all_param_values(output_layer))
 
-            if validation_loss > min_state.loss and epoch - min_state.epoch > _LEARNING_RATE_GRACE_PERIOD:
+            if validation_accuracy < max_state.accuracy and epoch - max_state.epoch > _LEARNING_RATE_GRACE_PERIOD:
                 new_learning_rate = learning_rate_var.get_value() / lasagne.utils.floatX(10)
                 if new_learning_rate < _MIN_LEARNING_RATE:
                     print('Reached minimum learning rate. Stopping now.')
                     break
                 learning_rate_var.set_value(new_learning_rate)
-                lasagne.layers.set_all_param_values(output_layer, min_state.params)
-                min_state = _MinState(min_state.loss, epoch, min_state.params)
-                print('Validation loss increased from minimum, decreasing learning rate to %.0e' % new_learning_rate)
+                lasagne.layers.set_all_param_values(output_layer, max_state.params)
+                max_state = _MaxState(max_state.accuracy, epoch, max_state.params)
+                print('Validation accuracy decreased from max, decreasing learning rate to %.0e' % new_learning_rate)
 
     if snapshot_final_model:
         print('Training finished -- saving final model')
