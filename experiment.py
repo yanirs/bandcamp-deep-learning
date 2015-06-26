@@ -1,5 +1,5 @@
 from ast import literal_eval
-from collections import namedtuple, OrderedDict
+from collections import namedtuple
 import inspect
 import os
 from random import Random
@@ -118,24 +118,31 @@ def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=
 
 
 @command
-def search_hyperparams(base_cmd, log_dir, max_evals=10, learning_rate_range=None):
+def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_space=None, max_evals=10,
+                       learning_rate_range=None):
     # TODO: docstring
 
-    def join_command_line_args(values):
+    def join_command_line_args(param_dict):
         pairs = []
-        for k, v in zip(label_to_generating_func, values):
-            if k == 'mirror_crops':
-                if not v:
+        for param_name, param_value in sorted(param_dict.iteritems()):
+            if param_name == 'mirror_crops':
+                if not param_value:
                     pairs.append('--no-mirror-crops')
+            elif param_name == 'model_params':
+                if param_value:
+                    pairs.append('--model-params')
+                    pairs.append(':'.join('%s=%s' % (k, v) for k, v in param_value.iteritems()))
             else:
-                pairs.append('--%s %s' % (k, v))
+                pairs.append('--%s %s' % (param_name, param_value))
         return ' '.join(pairs)
 
-    def objective(values):
+    def objective(param_dict):
         # TODO: fix possible collisions
-        log_filename = os.path.join(log_dir, 'experiment.%s.log' % hash(values))
-        cmd = '%s %s 2>&1 | tee %s' % (base_cmd, join_command_line_args(values), log_filename)
+        cmd_args = join_command_line_args(param_dict)
+        log_filename = os.path.join(log_dir, 'experiment.%s.log' % hash((base_cmd, cmd_args)))
+        cmd = '%s %s 2>&1 | tee %s' % (base_cmd, cmd_args, log_filename)
         print
+        output = None
         try:
             if os.path.exists(log_filename):
                 print('Loading results of %s' % cmd)
@@ -149,7 +156,8 @@ def search_hyperparams(base_cmd, log_dir, max_evals=10, learning_rate_range=None
                 error_rate = np.inf
             else:
                 error_rate = 100 - float(output.strip().split()[-1].strip('%'))
-        except Exception:
+        except:
+            print('Command output: %s' % output)
             os.unlink(log_filename)
             raise
         print('\tError rate: %.2f%%' % error_rate)
@@ -160,24 +168,26 @@ def search_hyperparams(base_cmd, log_dir, max_evals=10, learning_rate_range=None
     else:
         os.makedirs(log_dir)
 
-    learning_rate_range = literal_eval(learning_rate_range) if learning_rate_range else (-7, -2)
-    label_to_generating_func = OrderedDict((
-        ('update_func_name', hyperopt.hp.choice('update_func_name', ['adam', 'nesterov_momentum'])),
-        ('learning_rate', hyperopt.hp.loguniform('learning_rate', *learning_rate_range)),
-        ('mirror_crops', hyperopt.hp.choice('mirror_crops', [False, True])),
-        ('num_crops', hyperopt.hp.choice('num_crops', [1, 5, 10]))
-    ))
+    learning_rate_range = literal_eval(learning_rate_range) if learning_rate_range else (-12, -5)
+    model_params = _parse_model_params(base_model_params) if base_model_params else {}
+    parsed_model_param_space = _parse_model_params(model_params_space) if model_params_space else {}
+    for param_name_and_hp_func, hp_func_args in parsed_model_param_space.iteritems():
+        param_name, hp_func_name = param_name_and_hp_func.split('__')
+        model_params[param_name] = getattr(hyperopt.hp, hp_func_name)(param_name, *hp_func_args)
+    space = dict(
+        update_func_name=hyperopt.hp.choice('update_func_name', ['adam', 'nesterov_momentum']),
+        learning_rate=hyperopt.hp.loguniform('learning_rate', *learning_rate_range),
+        mirror_crops=hyperopt.hp.choice('mirror_crops', [False, True]),
+        num_crops=hyperopt.hp.choice('num_crops', [1, 5]),
+        model_params=model_params
+    )
 
     # TODO:
     # - nesterov momentum: in [0.5, 0.99]
     # - adam parameters -- which ones are important?
-    # - dropout: 0.0 to 0.75 (with architectures?)
-    # - architecture parameters as a nested space (how to unpack?)
 
     trials = hyperopt.Trials()
-    hyperopt.fmin(objective, space=label_to_generating_func.values(), algo=hyperopt.tpe.suggest, trials=trials,
-                  max_evals=max_evals)
-
+    hyperopt.fmin(objective, space=space, algo=hyperopt.tpe.suggest, trials=trials, max_evals=max_evals)
     print('---\nBest command line: %(cmd)s\nError rate: %(loss).2f%%' % trials.best_trial['result'])
 
 
