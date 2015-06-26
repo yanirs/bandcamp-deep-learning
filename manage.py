@@ -5,6 +5,7 @@ import sys
 
 import data
 import experiment
+import hypersearch
 
 
 if __name__ == '__main__':

@@ -1,28 +1,27 @@
+"""Functionality for running an experiment with a single set of hyperparameters."""
+
 from ast import literal_eval
 from collections import namedtuple
 import inspect
-import os
 from random import Random
 from time import time
 import sys
 from types import FunctionType
-from warnings import warn
 
 from commandr import command
-import hyperopt
 import lasagne
 import numpy as np
 from sklearn import utils as skutils
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import MinMaxScaler
+
 from sklearn.svm import LinearSVC
-import subprocess
 import theano
+
 from theano_latest.misc import pkl_utils
-
 from architectures import ARCHITECTURE_NAME_TO_CLASS
-
+from util import parse_param_str
 
 _MIN_LEARNING_RATE = 1e-10
 _LEARNING_RATE_GRACE_PERIOD = 3
@@ -83,12 +82,12 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     model_builder = ARCHITECTURE_NAME_TO_CLASS[model_architecture](
         dataset, output_dim=len(label_to_index), batch_size=batch_size, chunk_size=chunk_size, verbose=verbose,
         update_func_name=update_func_name, learning_rate=learning_rate_var,
-        update_func_kwargs=_parse_param_str(update_func_kwargs), num_crops=num_crops,
+        update_func_kwargs=parse_param_str(update_func_kwargs), num_crops=num_crops,
         crop_shape=literal_eval(crop_shape) if crop_shape else None, mirror_crops=mirror_crops
     )
     start_epoch, output_layer = _load_model_snapshot(start_from_snapshot) if start_from_snapshot else (0, None)
     output_layer, training_iter, validation_eval = model_builder.build(
-        output_layer=output_layer, **_parse_param_str(model_params)
+        output_layer=output_layer, **parse_param_str(model_params)
     )
     _print_network_info(output_layer)
 
@@ -119,84 +118,6 @@ def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=
         print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
     else:
         raise ValueError('Unknown baseline_name %s (supported values: random_forest, linear)' % baseline_name)
-
-
-@command
-def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_space=None, max_evals=10,
-                       learning_rate_range=None):
-    # TODO: docstring
-
-    def join_command_line_args(param_dict):
-        dict_to_param_str = lambda d: ':'.join('%s=%s' % (k, v) for k, v in sorted(d.iteritems()))
-        args = []
-        for param_name, param_value in sorted(param_dict.iteritems()):
-            if param_name == 'mirror_crops':
-                if not param_value:
-                    args.append('--no-mirror-crops')
-            elif param_name == 'model_params':
-                if param_value:
-                    args.append('--model-params %s' % dict_to_param_str(param_value))
-            elif param_name == 'update_func':
-                args.append('--update-func-name %s' % param_value.pop('name'))
-                args.append('--update-func-kwargs %s' % dict_to_param_str(param_value))
-            else:
-                args.append('--%s %s' % (param_name, param_value))
-        return ' '.join(args)
-
-    def objective(param_dict):
-        # TODO: fix possible collisions
-        cmd_args = join_command_line_args(param_dict)
-        log_filename = os.path.join(log_dir, 'experiment.%s.log' % hash((base_cmd, cmd_args)))
-        cmd = '%s %s 2>&1 | tee %s' % (base_cmd, cmd_args, log_filename)
-        print
-        output = None
-        try:
-            if os.path.exists(log_filename):
-                print('Loading results of %s' % cmd)
-                with open(log_filename, 'rb') as log_file:
-                    output = log_file.read()
-            else:
-                print('Running %s' % cmd)
-                output = subprocess.check_output(cmd, shell=True)
-
-            if 'OverflowError' in output or 'MemoryError' in output:
-                error_rate = np.inf
-            else:
-                error_rate = 100 - float(output.strip().split()[-1].strip('%'))
-        except:
-            print('Command output: %s' % output)
-            os.unlink(log_filename)
-            raise
-        print('\tError rate: %.2f%%' % error_rate)
-        return dict(loss=error_rate, status=hyperopt.STATUS_OK, cmd=cmd)
-
-    if os.path.exists(log_dir):
-        warn('Log directory %s exists. Existing log files may be read to avoid repeating experiments.' % log_dir)
-    else:
-        os.makedirs(log_dir)
-
-    learning_rate_range = literal_eval(learning_rate_range) if learning_rate_range else (-12, -5)
-    model_params = _parse_param_str(base_model_params)
-    for param_name_and_hp_func, hp_func_args in _parse_param_str(model_params_space).iteritems():
-        param_name, hp_func_name = param_name_and_hp_func.split('__')
-        model_params[param_name] = getattr(hyperopt.hp, hp_func_name)(param_name, *hp_func_args)
-    space = dict(
-        update_func=hyperopt.hp.choice('update_func', [
-            dict(name='adam',
-                 beta1=hyperopt.hp.uniform('beta1', 0.0, 0.9),
-                 beta2=hyperopt.hp.uniform('beta2', 0.99, 1.0)),
-            dict(name='nesterov_momentum',
-                 momentum=hyperopt.hp.uniform('momentum', 0.5, 1.0))
-        ]),
-        learning_rate=hyperopt.hp.loguniform('learning_rate', *learning_rate_range),
-        mirror_crops=hyperopt.hp.choice('mirror_crops', [False, True]),
-        num_crops=hyperopt.hp.choice('num_crops', [1, 5]),
-        model_params=model_params
-    )
-
-    trials = hyperopt.Trials()
-    hyperopt.fmin(objective, space=space, algo=hyperopt.tpe.suggest, trials=trials, max_evals=max_evals)
-    print('---\nBest command line: %(cmd)s\nError rate: %(loss).2f%%' % trials.best_trial['result'])
 
 
 def _save_model_snapshot(output_layer, snapshot_prefix, next_epoch):
@@ -246,18 +167,6 @@ def _load_data(dataset_path, reshape_to=None, subtract_mean=False, flatten=False
                                                  if len(data.shape) > 2 else (data, labels)))
     _transform_dataset(dataset, skutils.shuffle)
     return dataset, label_to_index
-
-
-def _parse_param_str(param_str):
-    param_kwargs = {}
-    if param_str:
-        for pair in param_str.split(':'):
-            key, value = pair.split('=')
-            try:
-                param_kwargs[key] = literal_eval(value)
-            except (SyntaxError, ValueError):
-                param_kwargs[key] = value
-    return param_kwargs
 
 
 def _get_default_init_kwargs(obj):
