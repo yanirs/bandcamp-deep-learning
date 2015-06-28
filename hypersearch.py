@@ -1,5 +1,5 @@
 """Functionality for running experiments for optimising hyperparameters."""
-
+from numbers import Number
 from warnings import warn
 from ast import literal_eval
 import os
@@ -14,7 +14,7 @@ from util import parse_param_str
 
 @command
 def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_space=None, max_evals=10,
-                       learning_rate_range=None):
+                       learning_rate_range=None, disabled_hyperparams=None):
     """Run a sequential hyperparameter search using hyperopt.fmin().
 
     To enable restartability and reproducibility, each hyperparameter combination is evaluated by calling base_cmd
@@ -43,6 +43,7 @@ def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_s
                          and continue from the point where that run stopped.
      * learning_rate_range (str) - a pair of comma-separated values that specifies the range from which the
                                    learning_rate will be drawn, according to hyperopt.hp.loguniform
+     * disabled_hyperparams (str) - comma-separated list of hyperparameters with which no experimentation should be done
     """
 
     if os.path.exists(log_dir):
@@ -68,6 +69,8 @@ def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_s
         num_crops=hyperopt.hp.choice('num_crops', [1, 5]),
         model_params=model_params
     )
+    for hyperparam in (disabled_hyperparams.split(',') if disabled_hyperparams else ()):
+        del space[hyperparam]
 
     trials = hyperopt.Trials()
     hyperopt.fmin(lambda param_dict: _eval_objective(param_dict, log_dir, base_cmd), space=space,
@@ -76,7 +79,8 @@ def search_hyperparams(base_cmd, log_dir, base_model_params=None, model_params_s
 
 
 def _create_command_args(param_dict):
-    dict_to_param_str = lambda d: ':'.join('%s=%s' % (k, v) for k, v in sorted(d.iteritems()))
+    value_to_str = lambda v: '%d' % v if isinstance(v, Number) and int(v) == v else '%s' % v
+    dict_to_param_str = lambda d: ':'.join('%s=%s' % (k, value_to_str(v)) for k, v in sorted(d.iteritems()))
     args = []
     for param_name, param_value in sorted(param_dict.iteritems()):
         if param_name == 'mirror_crops':
@@ -89,7 +93,7 @@ def _create_command_args(param_dict):
             args.append('--update-func-name %s' % param_value.pop('name'))
             args.append('--update-func-kwargs %s' % dict_to_param_str(param_value))
         else:
-            args.append('--%s %s' % (param_name, param_value))
+            args.append('--%s %s' % (param_name, value_to_str(param_value)))
     return ' '.join(args)
 
 
