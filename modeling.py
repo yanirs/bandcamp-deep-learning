@@ -52,7 +52,7 @@ class AbstractModelBuilder(object):
             output_layer = DenseLayer(self._build_middle(l_in, **kwargs), num_units=self.output_dim,
                                       nonlinearity=softmax)
         training_iter = self._create_training_function(output_layer)
-        validation_eval = self._create_eval_function('validation', output_layer)
+        validation_eval = self.create_eval_function('validation', output_layer)
         return output_layer, training_iter, validation_eval
 
     def _build_middle(self, l_in, **kwargs):
@@ -130,7 +130,7 @@ class AbstractModelBuilder(object):
         return self._create_theano_function_runner(theano_function, instances_var, labels_var,
                                                    *self.dataset['training'], deterministic=False)
 
-    def _create_eval_function(self, subset_name, output_layer):
+    def create_eval_function(self, subset_name, output_layer):
         """Return a function that returns the loss and accuracy of the given network on the given dataset's subset."""
         instances_var, labels_var, batch_index_var, batch_instances_var, batch_labels_var = self._create_data_vars()
         theano_function = theano.function(

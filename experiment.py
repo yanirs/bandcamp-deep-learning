@@ -32,7 +32,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
                    chunk_size=0, verbose=False, reshape_to=None, update_func_name='nesterov_momentum',
                    learning_rate=0.01, update_func_kwargs=None, adapt_learning_rate=False, subtract_mean=True,
                    labels_to_keep=None, snapshot_every=0, snapshot_prefix='model', start_from_snapshot=None,
-                   snapshot_final_model=True, num_crops=0, crop_shape=None, mirror_crops=True):
+                   snapshot_final_model=True, num_crops=0, crop_shape=None, mirror_crops=True, test_only=False):
     """Run a deep learning experiment, reporting results to standard output.
 
     Command line or in-process arguments:
@@ -69,6 +69,7 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
      * crop_shape (str) - if given, specifies the shape of the crops to be created (converted to tuple like reshape_to)
      * mirror_crops (bool) - if True, every random crop will be mirrored horizontally, making the effective number of
                              crops 2 * num_crops
+     * test_only (bool) - if True, no training will be performed, and results on the testing subset will be reported
     """
     # pylint: disable=too-many-locals,too-many-arguments
     assert theano.config.floatX == 'float32', 'Theano floatX must be float32 to ensure consistency with pickled dataset'
@@ -89,8 +90,13 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
     output_layer, training_iter, validation_eval = model_builder.build(
         output_layer=output_layer, **parse_param_str(model_params)
     )
-    _print_network_info(output_layer)
 
+    if test_only:
+        testing_loss, testing_accuracy = model_builder.create_eval_function('testing', output_layer)()
+        print('Testing loss & accuracy:\t %.6f\t%.2f%%' % (testing_loss, testing_accuracy * 100))
+        return
+
+    _print_network_info(output_layer)
     try:
         _run_training_loop(output_layer, training_iter, validation_eval, num_epochs, snapshot_every, snapshot_prefix,
                            snapshot_final_model, start_epoch, learning_rate_var, adapt_learning_rate)
@@ -101,21 +107,28 @@ def run_experiment(dataset_path, model_architecture, model_params=None, num_epoc
 
 
 @command
-def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=0, rf_num_iter=10, labels_to_keep=None):
-    """Run a baseline classifier (random_forest or linear) on the dataset, printing the validation subset accuracy."""
+def run_baseline(dataset_path, baseline_name, rf_n_estimators=100, random_state=0, rf_num_iter=10, labels_to_keep=None,
+                 test_subset='validation'):
+    """Run a baseline classifier (random_forest or linear) on the dataset, printing accuracy on test_subset."""
     dataset, _ = _load_data(dataset_path, flatten=True, labels_to_keep=labels_to_keep)
+    if test_subset == 'validation':
+        training_instances, training_labels = dataset['training']
+    else:
+        training_instances, training_labels = (np.concatenate((dataset['training'][i], dataset['validation'][i]))
+                                               for i in (0, 1))
+
     if baseline_name == 'random_forest':
         rnd = Random(random_state)
         scores = []
         for _ in xrange(rf_num_iter):
             estimator = RandomForestClassifier(n_jobs=-1, random_state=hash(rnd.random()), n_estimators=rf_n_estimators)
-            estimator.fit(*dataset['training'])
-            scores.append(estimator.score(*dataset['validation']))
-        print('Validation accuracy: {:.4f} (std: {:.4f})'.format(np.mean(scores), np.std(scores)))
+            estimator.fit(training_instances, training_labels)
+            scores.append(estimator.score(*dataset[test_subset]))
+        print('Accuracy: {:.4f} (std: {:.4f})'.format(np.mean(scores), np.std(scores)))
     elif baseline_name == 'linear':
         estimator = Pipeline([('scaler', MinMaxScaler()), ('svc', LinearSVC(random_state=random_state))])
-        estimator.fit(*dataset['training'])
-        print('Validation accuracy: {:.4f}'.format(estimator.score(*dataset['validation'])))
+        estimator.fit(training_instances, training_labels)
+        print('Accuracy: {:.4f}'.format(estimator.score(*dataset[test_subset])))
     else:
         raise ValueError('Unknown baseline_name %s (supported values: random_forest, linear)' % baseline_name)
 
@@ -226,7 +239,7 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
             if max_state is None or validation_accuracy > max_state.accuracy:
                 max_state = _MaxState(validation_accuracy, epoch, lasagne.layers.get_all_param_values(output_layer))
 
-            if validation_accuracy < max_state.accuracy and epoch - max_state.epoch > _LEARNING_RATE_GRACE_PERIOD:
+            if validation_accuracy <= max_state.accuracy and epoch - max_state.epoch > _LEARNING_RATE_GRACE_PERIOD:
                 new_learning_rate = learning_rate_var.get_value() / lasagne.utils.floatX(10)
                 if new_learning_rate < _MIN_LEARNING_RATE:
                     print('Reached minimum learning rate. Stopping now.')
@@ -234,7 +247,7 @@ def _run_training_loop(output_layer, training_iter, validation_eval, num_epochs,
                 learning_rate_var.set_value(new_learning_rate)
                 lasagne.layers.set_all_param_values(output_layer, max_state.params)
                 max_state = _MaxState(max_state.accuracy, epoch, max_state.params)
-                print('Validation accuracy decreased from max, decreasing learning rate to %.0e' % new_learning_rate)
+                print('Validation accuracy not increased from max, reducing learning rate to %.0e' % new_learning_rate)
 
     if snapshot_final_model:
         print('Training finished -- saving final model')
